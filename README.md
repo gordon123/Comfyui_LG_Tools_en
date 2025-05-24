@@ -8,7 +8,7 @@
 2. 将此仓库克隆到ComfyUI的`custom_nodes`目录下：
 ```bash
 cd ComfyUI/custom_nodes
-git clone https://github.com/your-username/Comfyui_LG_Tools.git
+git clone https://github.com/LAOGOU-666/Comfyui_LG_Tools.git
 ```
 
 3. 安装依赖：
