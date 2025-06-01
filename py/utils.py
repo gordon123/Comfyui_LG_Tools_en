@@ -485,6 +485,35 @@ async def copy_to_input(request):
         traceback.print_exc()
         return web.json_response({"error": str(e)}, status=500)
 
+# 在现有的API路由后添加删除文件的路由
+@PromptServer.instance.routes.delete("/lg/delete_image")
+async def delete_image(request):
+    try:
+        json_data = await request.json()
+        filename = json_data.get("filename")
+        
+        if not filename:
+            return web.json_response({"error": "未指定文件名"}, status=400)
+        
+        # 删除input目录中的文件
+        input_dir = folder_paths.get_input_directory()
+        file_path = os.path.join(input_dir, filename)
+        
+        if not os.path.exists(file_path):
+            return web.json_response({"error": f"文件不存在: {filename}"}, status=404)
+        
+        # 删除文件
+        os.remove(file_path)
+        
+        return web.json_response({
+            "success": True,
+            "message": f"文件 {filename} 已删除"
+        })
+    except Exception as e:
+        print(f"[LG_LoadImage] 删除文件失败: {str(e)}")
+        traceback.print_exc()
+        return web.json_response({"error": str(e)}, status=500)
+
 NODE_CLASS_MAPPINGS = {
     "CachePreviewBridge": CachePreviewBridge,
     "LG_Noise": LG_Noise,
