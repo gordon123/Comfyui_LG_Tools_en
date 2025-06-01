@@ -380,32 +380,22 @@ class LG_LoadImage(LoadImage):
         return LoadImage.IS_CHANGED(image)
 
     def load_image(self, image, keep_alpha=False):
-        image_path = folder_paths.get_annotated_filepath(image)
+        # 先调用父类方法获取完整的图像和遮罩
+        image_tensor, mask_tensor = super().load_image(image)
         
-        i = Image.open(image_path)
-        i = ImageOps.exif_transpose(i)
+        if keep_alpha:
+            # 如果需要保持alpha，重新加载为RGBA格式
+            image_path = folder_paths.get_annotated_filepath(image)
+            i = Image.open(image_path)
+            i = ImageOps.exif_transpose(i)
+            
+            if 'A' in i.getbands():
+                image = i.convert("RGBA")
+                image = np.array(image).astype(np.float32) / 255.0
+                image_tensor = torch.from_numpy(image)[None,]
         
-        if keep_alpha and 'A' in i.getbands():
-            # 保持RGBA格式
-            image = i.convert("RGBA")
-            image = np.array(image).astype(np.float32) / 255.0
-            image = torch.from_numpy(image)[None,]
-            
-            # 提取alpha通道作为mask
-            alpha = image[:, :, :, 3]
-            mask = 1.0 - alpha  # ComfyUI中mask的约定：1为遮罩，0为透明
-            
-            return (image, mask.unsqueeze(0))
-        else:
-            # 转换为RGB格式（原有逻辑）
-            image = i.convert("RGB")
-            image = np.array(image).astype(np.float32) / 255.0
-            image = torch.from_numpy(image)[None,]
-            
-            # 创建空的mask
-            mask = torch.zeros((image.shape[1], image.shape[2]), dtype=torch.float32, device="cpu")
-            
-            return (image, mask.unsqueeze(0))
+        # 遮罩直接使用父类提取的结果，不受keep_alpha影响
+        return (image_tensor, mask_tensor)
 
 
 @PromptServer.instance.routes.get("/lg/get/latest_image")
