@@ -5,7 +5,11 @@ import comfy.model_management
 class ImageSelectorCancelled(Exception):
     pass
 
-node_data = {}
+def get_selector_storage():
+    """获取图像选择器的共享存储空间"""
+    if not hasattr(PromptServer.instance, '_selector_node_data'):
+        PromptServer.instance._selector_node_data = {}
+    return PromptServer.instance._selector_node_data
 
 class ImageSelector(PreviewImage):
     @classmethod
@@ -38,6 +42,9 @@ class ImageSelector(PreviewImage):
         try:
             node_id = str(unique_id[0]) if isinstance(unique_id, list) else str(unique_id)
             actual_mode = mode[0] if isinstance(mode, list) else mode
+            
+            # 获取共享存储空间
+            node_data = get_selector_storage()
             
             image_list = []
             if isinstance(images, list):
@@ -149,6 +156,7 @@ class ImageSelector(PreviewImage):
         except ImageSelectorCancelled:
             raise comfy.model_management.InterruptProcessingException()
         except Exception as e:
+            node_data = get_selector_storage()
             if node_id in node_data:
                 self.cleanup_session_data(node_id)
             if 'image_list' in locals() and len(image_list) > 0:
@@ -157,6 +165,8 @@ class ImageSelector(PreviewImage):
                 return {"result": ([], "")}
 
     def cleanup_session_data(self, node_id):
+        """清理会话数据"""
+        node_data = get_selector_storage()
         if node_id in node_data:
             session_keys = ["event", "selected_indices", "images", "total_count", "cancelled"]
             for key in session_keys:
@@ -170,6 +180,9 @@ async def select_image_handler(request):
         node_id = data.get("node_id")
         selected_indices = data.get("selected_indices", [])
         action = data.get("action")
+        
+        # 获取共享存储空间
+        node_data = get_selector_storage()
         
         if node_id not in node_data:
             return web.json_response({"success": False, "error": "节点数据不存在"})

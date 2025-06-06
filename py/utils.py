@@ -504,18 +504,47 @@ async def delete_image(request):
         traceback.print_exc()
         return web.json_response({"error": str(e)}, status=500)
 
+class LG_LatentBatchToList:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "latent": ("LATENT",),
+            }
+        }
+    
+    RETURN_TYPES = ("LATENT",)
+    OUTPUT_IS_LIST = (True,)  # 表示输出是列表
+    FUNCTION = "batch_to_list"
+    CATEGORY = CATEGORY_TYPE
+    
+    def batch_to_list(self, latent):
+        """将latent batch转换为latent列表"""
+        samples = latent["samples"]
+        batch_size = samples.shape[0]
+        
+        # 将batch分离为单独的latent
+        latent_list = []
+        for i in range(batch_size):
+            single_latent = {"samples": samples[i:i+1]}  # 保持4维，但batch_size=1
+            latent_list.append(single_latent)
+        
+        return (latent_list,)
+
 NODE_CLASS_MAPPINGS = {
     "CachePreviewBridge": CachePreviewBridge,
     "LG_Noise": LG_Noise,
     "IPAdapterWeightTypes": IPAdapterWeightTypes,
     "LG_LoadImage": LG_LoadImage,
+    "LG_LatentBatchToList": LG_LatentBatchToList,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "CachePreviewBridge": "🎈LG_PreviewBridge",
     "LG_Noise": "🎈LG_Noise",
     "IPAdapterWeightTypes": "🎈IPAdapter权重类型",
-    "LG_LoadImage": "🎈LG_LoadImage"
+    "LG_LoadImage": "🎈LG_LoadImage",
+    "LG_LatentBatchToList": "🎈LG_Latent批次转列表"
 }
 
 

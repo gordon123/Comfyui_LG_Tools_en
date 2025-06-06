@@ -1,5 +1,6 @@
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
+
 app.registerExtension({
     name: "Comfyui_LG_Tools.ImageSelector",
     
@@ -53,12 +54,45 @@ app.registerExtension({
                         return null;
                     },
                     set: function(value) {
-                        // 忽略任何设置imageIndex的尝试
                     }
                 });
                 
                 this.ensurePropertiesValid();
                 this.updateWidgets();
+                
+                const canvas = app.canvas.canvas;
+                if (canvas && !this._globalMouseHandler) {
+                    this._globalMouseHandler = (event) => {
+                        if (!this.imgs || this.imgs.length === 0 || !this.imageRects) {
+                            return;
+                        }
+                        
+                        const mouse = app.canvas.graph_mouse;
+                        
+                        for (let i = 0; i < this.imageRects.length; i++) {
+                            const [rectX, rectY, rectWidth, rectHeight] = this.imageRects[i];
+                            
+                            const absoluteX = rectX + this.pos[0];
+                            const absoluteY = rectY + this.pos[1];
+                            
+                            const isInside = LiteGraph.isInsideRectangle(
+                                mouse[0], mouse[1],
+                                absoluteX, absoluteY,
+                                rectWidth, rectHeight
+                            );
+                            
+                            if (isInside) {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                this.toggleImageSelection(i);
+                                this.setDirtyCanvas(true, true);
+                                return;
+                            }
+                        }
+                    };
+                    
+                    canvas.addEventListener('click', this._globalMouseHandler, true);
+                }
                 
                 return result;
             };
@@ -80,87 +114,59 @@ app.registerExtension({
                 this.pointerDown = null;
                 this.overIndex = null;
                 
+                const originalImgs = this.imgs;
+                this.imgs = null;
+                
                 const result = onDrawBackground?.apply(this, arguments);
                 
-                this.drawSelectionOverlay(ctx);
+                this.imgs = originalImgs;
+                
+                this.drawImagesAndSelection(ctx);
                 
                 return result;
             };
             
-            const onMouseDown = nodeType.prototype.onMouseDown;
-            nodeType.prototype.onMouseDown = function(event, localPos, graphCanvas) {
-                this.ensurePropertiesValid();
+            nodeType.prototype.drawImagesAndSelection = function(ctx) {
+                if (!this.imgs || this.imgs.length === 0) return;
                 
-                if (event.isPrimary && this.imgs && this.imgs.length > 0) {
-                    const imageIndex = this.getImageIndexFromClick(localPos);
-                    if (imageIndex >= 0) {
-                        event.preventDefault();
-                        event.stopPropagation();
+                if (this.imageRects) {
+                    for (let i = 0; i < this.imgs.length; i++) {
+                        if (i >= this.imageRects.length) break;
                         
-                        this.pointerDown = null;
-                        this.overIndex = null;
+                        const [rectX, rectY, rectWidth, rectHeight] = this.imageRects[i];
+                        const img = this.imgs[i];
                         
-                        this.toggleImageSelection(imageIndex);
+                        ctx.fillStyle = "#000";
+                        ctx.fillRect(rectX, rectY, rectWidth, rectHeight);
                         
-                        this.setDirtyCanvas(true, true);
+                        let scaleX = rectWidth / img.naturalWidth;
+                        let scaleY = rectHeight / img.naturalHeight;
+                        let scale = Math.min(scaleX, scaleY);
                         
-                        return true;
+                        let imgHeight = scale * img.naturalHeight;
+                        let imgWidth = scale * img.naturalWidth;
+                        
+                        const imgX = rectX + (rectWidth - imgWidth) / 2;
+                        const imgY = rectY + (rectHeight - imgHeight) / 2;
+                        
+                        const margin = 2;
+                        ctx.drawImage(img, imgX + margin, imgY + margin, imgWidth - 2 * margin, imgHeight - 2 * margin);
                     }
                 }
                 
-                return onMouseDown?.apply(this, arguments);
-            };
-            
-            const onMouseMove = nodeType.prototype.onMouseMove;
-            nodeType.prototype.onMouseMove = function(event, localPos, graphCanvas) {
-                if (this.isChooser) {
-                    this.overIndex = null;
-                    this.pointerDown = null;
-                }
-                
-                return onMouseMove?.apply(this, arguments);
-            };
-            
-            const onMouseUp = nodeType.prototype.onMouseUp;
-            nodeType.prototype.onMouseUp = function(event, localPos, graphCanvas) {
-                if (this.isChooser) {
-                    this.pointerDown = null;
-                    this.overIndex = null;
-                }
-                
-                return onMouseUp?.apply(this, arguments);
-            };
-
-            const originalUpdate = nodeType.prototype.update;
-            nodeType.prototype.update = function() {
-                this.ensurePropertiesValid();
-                
-                this.updateWidgets();
-                this.setDirtyCanvas(true, true);
-                
-                if (originalUpdate && originalUpdate !== this.update) {
-                    originalUpdate.apply(this, arguments);
-                }
-            };
-
-            nodeType.prototype.drawSelectionOverlay = function(ctx) {
-                if (!this.imageRects || this.imageRects.length === 0 || !this.imgs) return;
-                
-                this.ensurePropertiesValid();
-                
+                ctx.lineWidth = 2;
                 this.selected_images.forEach(index => {
-                    if (index < this.imageRects.length && index < this.imgs.length) {
+                    if (index < this.imageRects.length) {
                         const [x, y, width, height] = this.imageRects[index];
                         
-                        ctx.strokeStyle = this.isWaitingSelection ? '#00ff00' : '#4CAF50';
-                        ctx.lineWidth = 3;
+                        ctx.strokeStyle = "green";
                         ctx.strokeRect(x + 1, y + 1, width - 2, height - 2);
                         
                         const checkSize = 20;
                         const checkX = x + width - checkSize - 5;
                         const checkY = y + 5;
                         
-                        ctx.fillStyle = this.isWaitingSelection ? '#00ff00' : '#4CAF50';
+                        ctx.fillStyle = '#4CAF50';
                         ctx.beginPath();
                         ctx.arc(checkX + checkSize/2, checkY + checkSize/2, checkSize/2, 0, 2 * Math.PI);
                         ctx.fill();
@@ -181,25 +187,252 @@ app.registerExtension({
                         ctx.fillText((index + 1).toString(), x + 14, y + 15);
                     }
                 });
+                
+                if (this.overIndex !== null && this.overIndex >= 0 && this.overIndex < this.imageRects.length) {
+                    const [x, y, width, height] = this.imageRects[this.overIndex];
+                    
+                    if (!this.selected_images.has(this.overIndex)) {
+                        ctx.lineWidth = 2;
+                        ctx.strokeStyle = "rgba(0, 255, 0, 0.5)";
+                        ctx.setLineDash([5, 5]);
+                        ctx.strokeRect(x + 1, y + 1, width - 2, height - 2);
+                        ctx.setLineDash([]);
+                        
+                        ctx.fillStyle = 'rgba(0, 255, 0, 0.3)';
+                        ctx.fillRect(x + 2, y + 2, 60, 18);
+                        ctx.fillStyle = '#ffffff';
+                        ctx.font = '10px Arial';
+                        ctx.textAlign = 'left';
+                        ctx.fillText('点击选择', x + 5, y + 14);
+                    }
+                }
+            };
+            
+            const onMouseDown = nodeType.prototype.onMouseDown;
+            nodeType.prototype.onMouseDown = function(event, localPos, graphCanvas) {
+                this.ensurePropertiesValid();
+                
+                if (event.isPrimary && this.imgs && this.imgs.length > 0) {
+                    if (!this.imageRects || this.imageRects.length === 0) {
+                        return onMouseDown?.apply(this, arguments);
+                    }
+                    
+                    const imageIndex = this.getImageIndexFromClick(localPos);
+                    
+                    if (imageIndex >= 0) {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        
+                        this.pointerDown = { imageIndex: imageIndex, localPos: [...localPos] };
+                        this.overIndex = imageIndex;
+                        
+                        this.setDirtyCanvas(true, true);
+                        
+                        return true;
+                    } else {
+                        this.pointerDown = null;
+                        this.overIndex = null;
+                    }
+                }
+                
+                return onMouseDown?.apply(this, arguments);
+            };
+            
+            const onMouseMove = nodeType.prototype.onMouseMove;
+            nodeType.prototype.onMouseMove = function(event, localPos, graphCanvas) {
+                if (this.isChooser && this.pointerDown) {
+                    const currentImageIndex = this.getImageIndexFromClick(localPos);
+                    this.overIndex = (currentImageIndex === this.pointerDown.imageIndex) ? currentImageIndex : null;
+                    this.setDirtyCanvas(true, true);
+                } else if (this.isChooser) {
+                    this.overIndex = null;
+                    this.pointerDown = null;
+                }
+                
+                return onMouseMove?.apply(this, arguments);
+            };
+            
+            const onMouseUp = nodeType.prototype.onMouseUp;
+            nodeType.prototype.onMouseUp = function(event, localPos, graphCanvas) {
+                if (this.isChooser && this.pointerDown) {
+                    const currentImageIndex = this.getImageIndexFromClick(localPos);
+                    
+                    if (currentImageIndex === this.pointerDown.imageIndex) {
+                        this.toggleImageSelection(currentImageIndex);
+                    }
+                    
+                    this.pointerDown = null;
+                    this.overIndex = null;
+                    this.setDirtyCanvas(true, true);
+                } else if (this.isChooser) {
+                    this.pointerDown = null;
+                    this.overIndex = null;
+                }
+                
+                return onMouseUp?.apply(this, arguments);
+            };
+
+            const originalUpdate = nodeType.prototype.update;
+            nodeType.prototype.update = function() {
+                this.ensurePropertiesValid();
+                
+                this.updateWidgets();
+                this.calculateImageLayout();
+                this.setDirtyCanvas(true, true);
+                
+                if (originalUpdate && originalUpdate !== this.update) {
+                    originalUpdate.apply(this, arguments);
+                }
+            };
+
+            const originalOnResize = nodeType.prototype.onResize;
+            nodeType.prototype.onResize = function(size) {
+                this.ensurePropertiesValid();
+                
+                if (this.imgs && this.imgs.length > 0) {
+                    this.calculateImageLayout();
+                }
+                
+                if (originalOnResize) {
+                    originalOnResize.apply(this, arguments);
+                }
+            };
+            
+            nodeType.prototype.calculateImageLayout = function() {
+                if (!this.imgs || this.imgs.length === 0) {
+                    this.imageRects = [];
+                    return;
+                }
+                
+                const titleHeight = LiteGraph.NODE_TITLE_HEIGHT || 30;
+                const widgetHeight = 30;
+                const imageTextHeight = 15;
+                const margin = 4;
+                
+                let widgetsHeight = 0;
+                if (this.widgets && this.widgets.length > 0) {
+                    const visibleWidgets = this.widgets.filter(w => !w.hidden);
+                    widgetsHeight = visibleWidgets.length * widgetHeight + margin;
+                }
+                
+                const shiftY = titleHeight + widgetsHeight;
+                
+                const dw = this.size[0] - margin * 2;
+                const dh = this.size[1] - shiftY - imageTextHeight - margin;
+                
+                this.imageRects = [];
+                
+                if (this.imgs.length === 1) {
+                    const img = this.imgs[0];
+                    if (img.naturalWidth && img.naturalHeight) {
+                        let w = img.naturalWidth;
+                        let h = img.naturalHeight;
+                        
+                        const scaleX = dw / w;
+                        const scaleY = dh / h;
+                        const scale = Math.min(scaleX, scaleY, 1);
+                        
+                        w *= scale;
+                        h *= scale;
+                        
+                        const x = margin + (dw - w) / 2;
+                        const y = shiftY + (dh - h) / 2;
+                        
+                        this.imageRects.push([x, y, w, h]);
+                    }
+                } else {
+                    const numImages = this.imgs.length;
+                    
+                    let w = this.imgs[0].naturalWidth;
+                    let h = this.imgs[0].naturalHeight;
+                    
+                    let bestLayout = null;
+                    let bestArea = 0;
+                    
+                    for (let cols = 1; cols <= numImages; cols++) {
+                        const rows = Math.ceil(numImages / cols);
+                        
+                        const availableWidthPerImage = dw / cols;
+                        const availableHeightPerImage = dh / rows;
+                        
+                        const scaleX = availableWidthPerImage / w;
+                        const scaleY = availableHeightPerImage / h;
+                        const scale = Math.min(scaleX, scaleY, 1);
+                        
+                        const imageWidth = w * scale;
+                        const imageHeight = h * scale;
+                        
+                        const actualGridWidth = cols * imageWidth;
+                        const actualGridHeight = rows * imageHeight;
+                        
+                        if (actualGridWidth <= dw && actualGridHeight <= dh) {
+                            const area = imageWidth * imageHeight * numImages;
+                            
+                            if (area > bestArea) {
+                                bestArea = area;
+                                bestLayout = {
+                                    cols: cols,
+                                    rows: rows,
+                                    imageWidth: imageWidth,
+                                    imageHeight: imageHeight,
+                                    actualGridWidth: actualGridWidth,
+                                    actualGridHeight: actualGridHeight,
+                                    scale: scale
+                                };
+                            }
+                        }
+                    }
+                    
+                    if (bestLayout) {
+                        const gridOffsetX = margin + (dw - bestLayout.actualGridWidth) / 2;
+                        const gridOffsetY = shiftY + (dh - bestLayout.actualGridHeight) / 2;
+                        
+                        for (let i = 0; i < numImages; i++) {
+                            const row = Math.floor(i / bestLayout.cols);
+                            const col = i % bestLayout.cols;
+                            
+                            const imgX = gridOffsetX + col * bestLayout.imageWidth;
+                            const imgY = gridOffsetY + row * bestLayout.imageHeight;
+                            
+                            this.imageRects.push([imgX, imgY, bestLayout.imageWidth, bestLayout.imageHeight]);
+                        }
+                    } else {
+                        const imageHeight = Math.min(dh / numImages, 100);
+                        const imageWidth = imageHeight * (w / h);
+                        
+                        for (let i = 0; i < numImages; i++) {
+                            const imgX = margin + (dw - imageWidth) / 2;
+                            const imgY = shiftY + i * imageHeight;
+                            this.imageRects.push([imgX, imgY, imageWidth, imageHeight]);
+                        }
+                    }
+                }
             };
             
             nodeType.prototype.getImageIndexFromClick = function(pos) {
-                if (!this.imageRects) return -1;
+                if (!this.imageRects) {
+                    return -1;
+                }
                 
                 for (let i = 0; i < this.imageRects.length; i++) {
                     const [x, y, width, height] = this.imageRects[i];
-                    if (pos[0] >= x && pos[0] <= x + width &&
-                        pos[1] >= y && pos[1] <= y + height) {
+                    const isInside = pos[0] >= x && pos[0] <= x + width &&
+                                   pos[1] >= y && pos[1] <= y + height;
+                    
+                    if (isInside) {
                         return i;
                     }
                 }
+                
                 return -1;
             };
             
             nodeType.prototype.toggleImageSelection = function(index) {
                 this.ensurePropertiesValid();
                 
-                if (this.selected_images.has(index)) {
+                const wasSelected = this.selected_images.has(index);
+                
+                if (wasSelected) {
                     this.selected_images.delete(index);
                 } else {
                     this.selected_images.add(index);
@@ -238,7 +471,7 @@ app.registerExtension({
                 this.update();
             };
             
-            nodeType.prototype.cancelSelection = function() {
+            nodeType.prototype.cancelSelection = function(source = "manual") {
                 if (!this.isWaitingSelection) {
                     return;
                 }
@@ -309,6 +542,20 @@ app.registerExtension({
     },
     
     setup() {
+        const originalInterrupt = api.interrupt;
+        
+        api.interrupt = function() {
+            if (app.graph && app.graph._nodes_by_id) {
+                Object.values(app.graph._nodes_by_id).forEach(node => {
+                    if (node.isChooser && node.isWaitingSelection) {
+                        node.cancelSelection("interrupt");
+                    }
+                });
+            }
+            
+            originalInterrupt.apply(this, arguments);
+        };
+
         api.addEventListener("image_selector_update", (event) => {
             const data = event.detail;
             
@@ -344,19 +591,25 @@ app.registerExtension({
             node.overIndex = null;
             
             node.imgs = [];
+            let loadedCount = 0;
+            
             imageData.forEach((imgData, i) => {
                 const img = new Image();
                 img.onload = () => {
-                    app.graph.setDirtyCanvas(true);
+                    loadedCount++;
+                    
+                    if (loadedCount === imageData.length) {
+                        node.calculateImageLayout();
+                        app.graph.setDirtyCanvas(true);
+                    }
                 };
                 
-                img.src = `/view?filename=${encodeURIComponent(imgData.filename)}&type=${imgData.type}&subfolder=${imgData.subfolder || ''}&${app.getPreviewFormatParam()}`;
+                img.src = api.apiURL(`/view?filename=${encodeURIComponent(imgData.filename)}&type=${imgData.type}&subfolder=${imgData.subfolder}&rand=${Math.random()}`);
                 node.imgs.push(img);
             });
             
             if (!node.setSizeForImage) {
                 node.setSizeForImage = function() {
-                    // 使用系统默认的尺寸计算
                 };
             }
             
