@@ -163,14 +163,16 @@ class BridgePreviewNode(PreviewImage):
                 if result_data is not None and isinstance(result_data, tuple) and len(result_data) == 2:
                     final_images, final_mask = result_data
                     if current_hash:
+                        # 缓存时使用原始遮罩
                         output_result = self.save_output_images(final_images, final_mask, filename_prefix + "_output", prompt, extra_pnginfo)
                         output_urls = output_result["ui"]["images"] if output_result and "ui" in output_result else []
                         cache[node_id] = {
                             "input_hash": current_hash,
                             "output_urls": output_urls,
-                            "final_result": (final_images, final_mask)
+                            "final_result": (final_images, final_mask)  # 缓存原始遮罩
                         }
-                    return (final_images, final_mask)
+                    # 返回时反转遮罩，但不影响缓存
+                    return (final_images, 1 - final_mask)
                 else:
                     return (images, default_mask)
                     
@@ -256,8 +258,6 @@ def load_processed_image(file_info):
             np_image = np.array(image)
             rgb_image = np_image[:, :, :3]
             alpha_channel = np_image[:, :, 3]
-            # 反转 alpha 通道的值
-            alpha_channel = 255 - alpha_channel
             tensor_image = torch.from_numpy(rgb_image / 255.0).float().unsqueeze(0)
             mask_tensor = torch.from_numpy(alpha_channel / 255.0).float().unsqueeze(0)
             return tensor_image, mask_tensor
