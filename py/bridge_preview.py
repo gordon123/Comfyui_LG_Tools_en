@@ -256,6 +256,8 @@ def load_processed_image(file_info):
             np_image = np.array(image)
             rgb_image = np_image[:, :, :3]
             alpha_channel = np_image[:, :, 3]
+            # 反转 alpha 通道的值
+            alpha_channel = 255 - alpha_channel
             tensor_image = torch.from_numpy(rgb_image / 255.0).float().unsqueeze(0)
             mask_tensor = torch.from_numpy(alpha_channel / 255.0).float().unsqueeze(0)
             return tensor_image, mask_tensor
