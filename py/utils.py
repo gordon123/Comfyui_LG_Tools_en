@@ -531,12 +531,124 @@ class LG_LatentBatchToList:
         
         return (latent_list,)
 
+class LG_SaveImage:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "images": ("IMAGE",),
+                "filename_prefix": ("STRING", {
+                    "default": "ComfyUI_{timestamp}", 
+                    "multiline": False,
+                    "tooltip": "文件名前缀，支持表达式：{timestamp}时间戳、{date}日期、{time}时间、{datetime}日期时间、{batch}批次号、{counter}计数器"
+                }),
+                "path": ("STRING", {
+                    "default": "", 
+                    "multiline": False, 
+                    "placeholder": "留空使用默认输出目录",
+                    "tooltip": "保存路径，支持绝对路径和相对路径，不存在时自动创建"
+                }),
+                "format": (["png", "jpg", "webp"], {
+                    "default": "png",
+                    "tooltip": "图像保存格式：PNG无损、JPG/WebP有损压缩"
+                }),
+                "quality": ("INT", {
+                    "default": 95, 
+                    "min": 1, 
+                    "max": 100, 
+                    "step": 1,
+                    "tooltip": "图像质量(1-100)，仅对JPG和WebP格式有效，PNG格式忽略此参数"
+                }),
+            },
+        }
+
+    RETURN_TYPES = ()
+    FUNCTION = "save_images"
+    OUTPUT_NODE = True
+    CATEGORY = CATEGORY_TYPE
+
+    def save_images(self, images, filename_prefix="ComfyUI_{timestamp}", path="", format="png", quality=95):
+        # 确定保存路径
+        if path:
+            # 支持相对路径和绝对路径
+            if os.path.isabs(path):
+                save_dir = path
+            else:
+                # 相对路径基于ComfyUI根目录
+                save_dir = os.path.join(os.getcwd(), path)
+        else:
+            # 使用默认输出目录
+            save_dir = folder_paths.get_output_directory()
+        
+        # 创建目录（如果不存在）
+        os.makedirs(save_dir, exist_ok=True)
+        
+        # 一次性获取时间信息（避免重复计算）
+        import datetime
+        now = datetime.datetime.now()
+        timestamp = str(int(now.timestamp()))
+        date_str = now.strftime("%Y%m%d")
+        time_str = now.strftime("%H%M%S")
+        datetime_str = now.strftime("%Y%m%d_%H%M%S")
+        
+        # 预处理文件名前缀，只替换非批次相关的变量
+        base_prefix = filename_prefix.replace("{timestamp}", timestamp)
+        base_prefix = base_prefix.replace("{date}", date_str)
+        base_prefix = base_prefix.replace("{time}", time_str)
+        base_prefix = base_prefix.replace("{datetime}", datetime_str)
+        
+        file_extension = f".{format}"
+        
+        # 使用类似系统的计数器逻辑
+        full_output_folder, filename, counter, subfolder, _ = folder_paths.get_save_image_path(base_prefix, save_dir, images[0].shape[1], images[0].shape[0])
+        
+        for batch_number, image in enumerate(images):
+            # 转换tensor为PIL图像
+            i = 255. * image.cpu().numpy()
+            img = Image.fromarray(np.clip(i, 0, 255).astype(np.uint8))
+            
+            # 处理批次和计数器变量
+            processed_prefix = base_prefix
+            if "{batch}" in filename_prefix:
+                processed_prefix = processed_prefix.replace("{batch}", f"{batch_number:05d}")
+            if "{counter}" in filename_prefix:
+                processed_prefix = processed_prefix.replace("{counter}", f"{counter:05d}")
+            
+            # 生成文件名
+            final_filename = f"{processed_prefix}{file_extension}"
+            
+            # 如果没有使用批次或计数器变量，且有多张图片，需要避免重名
+            if len(images) > 1 and "{batch}" not in filename_prefix and "{counter}" not in filename_prefix:
+                name_without_ext = os.path.splitext(final_filename)[0]
+                final_filename = f"{name_without_ext}_{batch_number:05d}{file_extension}"
+            
+            file_path = os.path.join(full_output_folder, final_filename)
+            counter += 1
+            
+            # 根据格式保存图像，移除optimize减少处理时间
+            if format == "png":
+                # 使用与系统相同的compress_level
+                img.save(file_path, format='PNG', compress_level=4)
+
+            elif format == "jpg":
+                # 确保RGB模式（JPEG不支持透明度）
+                if img.mode in ('RGBA', 'LA', 'P'):
+                    img = img.convert('RGB')
+                img.save(file_path, format='JPEG', quality=quality)
+
+            elif format == "webp":
+                img.save(file_path, format='WebP', quality=quality)
+
+        
+        return {}
+
 NODE_CLASS_MAPPINGS = {
     "CachePreviewBridge": CachePreviewBridge,
     "LG_Noise": LG_Noise,
     "IPAdapterWeightTypes": IPAdapterWeightTypes,
     "LG_LoadImage": LG_LoadImage,
     "LG_LatentBatchToList": LG_LatentBatchToList,
+    "LG_SaveImage": LG_SaveImage,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -544,7 +656,8 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "LG_Noise": "🎈LG_Noise",
     "IPAdapterWeightTypes": "🎈IPAdapter权重类型",
     "LG_LoadImage": "🎈LG_LoadImage",
-    "LG_LatentBatchToList": "🎈LG_Latent批次转列表"
+    "LG_LatentBatchToList": "🎈LG_Latent批次转列表",
+    "LG_SaveImage": "🎈LG_SaveImage"
 }
 
 

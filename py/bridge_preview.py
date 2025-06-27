@@ -106,9 +106,9 @@ class BridgePreviewNode(PreviewImage):
                     cached_data = cache[node_id]
                     if (cached_data.get("input_hash") == current_hash and 
                         cached_data.get("final_result")):
-                        # 返回缓存的最终结果
+                        # 返回缓存的最终结果，保持与弹窗模式一致的遮罩反转
                         cached_images, cached_mask = cached_data["final_result"]
-                        return (cached_images, cached_mask)
+                        return (cached_images, 1 - cached_mask)
                 
                 # 没有缓存或输入改变，返回原图和全白遮罩
                 batch_size, height, width, channels = images.shape
