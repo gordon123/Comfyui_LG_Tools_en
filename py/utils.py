@@ -1,6 +1,66 @@
 from .md import *
 CATEGORY_TYPE = "🎈LAOGOU/Utils"
 
+def execute_command_with_realtime_output(cmd, cwd, message_path, clear_first=True, start_message=""):
+    """通用的实时命令执行方法"""
+    import subprocess
+    import sys
+    from server import PromptServer
+    import comfy.model_management as model_management
+    
+    try:
+        # 发送开始消息
+        if start_message:
+            PromptServer.instance.send_sync(message_path, {
+                "text": start_message,
+                "clear": clear_first
+            })
+        
+        # 执行命令，实时输出
+        process = subprocess.Popen(
+            cmd,
+            cwd=cwd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            universal_newlines=True
+        )
+        
+        # 实时读取输出
+        while True:
+            # 检查是否被中断
+            if model_management.processing_interrupted():
+                process.terminate()
+                PromptServer.instance.send_sync(message_path, {
+                    "text": "🛑 用户中断了操作",
+                    "clear": False
+                })
+                return False, "🛑 用户中断了操作"
+            
+            output = process.stdout.readline()
+            if output == '' and process.poll() is not None:
+                break
+            if output:
+                line = output.strip()
+                if line:
+                    PromptServer.instance.send_sync(message_path, {
+                        "text": line,
+                        "clear": False
+                    })
+        
+        # 检查返回码
+        return_code = process.poll()
+        return return_code == 0, return_code
+        
+    except Exception as e:
+        error_msg = f"💥 执行异常: {str(e)}"
+        PromptServer.instance.send_sync(message_path, {
+            "text": error_msg,
+            "clear": False
+        })
+        return False, str(e)
+
 pb_id_cnt = time.time()
 preview_bridge_image_id_map = {}
 preview_bridge_image_name_map = {}
@@ -531,6 +591,136 @@ class LG_LatentBatchToList:
         
         return (latent_list,)
 
+class LG_PipManager:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "package_name": ("STRING", {
+                    "default": "",
+                    "multiline": True,
+                    "placeholder": "支持多种格式:\nnumpy==1.21.0  # 指定版本\ntorch>=1.9.0   # 版本范围\nrequests[security]  # 额外依赖\nnumpy torch pandas  # 多个包",
+                    "tooltip": "包名支持版本号、额外依赖、多包安装等pip标准格式"
+                }),
+                "operation": (["install", "uninstall", "upgrade", "list"], {
+                    "default": "install",
+                    "tooltip": "选择操作类型：安装、卸载、升级或列出已安装包"
+                }),
+            }
+        }
+    
+    RETURN_TYPES = ()
+    FUNCTION = "manage_package"
+    OUTPUT_NODE = True
+    CATEGORY = CATEGORY_TYPE
+    
+    def manage_package(self, package_name, operation):
+        import sys
+        import re
+        
+        # 如果是 list 操作，忽略输入直接列出已安装包
+        if operation == "list":
+            cmd = [sys.executable, "-m", "pip", "list"]
+            emoji = "📋"
+            action = "列出已安装包"
+            start_message = f"{emoji} 正在{action}..."
+            
+            # 使用通用方法执行命令
+            success, result = execute_command_with_realtime_output(
+                cmd, None, "/lg/pip_manager", True, start_message
+            )
+            
+            if isinstance(result, str):  # 中断或异常
+                return {"ui": {"text": (result,)}}
+            
+            if success:
+                success_msg = "✅ 已列出所有已安装的包"
+                PromptServer.instance.send_sync("/lg/pip_manager", {
+                    "text": success_msg,
+                    "clear": False
+                })
+                return {"ui": {"text": (success_msg,)}}
+            else:
+                error_msg = f"❌ 列出包失败 (退出码: {result})"
+                PromptServer.instance.send_sync("/lg/pip_manager", {
+                    "text": error_msg,
+                    "clear": False
+                })
+                return {"ui": {"text": (error_msg,)}}
+        
+        # 其他操作需要检查包名输入
+        if not package_name.strip():
+            return {"ui": {"text": ("❌ 请输入包名",)}}
+        
+        # 处理多行输入，过滤注释和空行
+        lines = []
+        for line in package_name.strip().split('\n'):
+            line = line.split('#')[0].strip()  # 移除注释
+            if line:  # 忽略空行
+                lines.append(line)
+        
+        if not lines:
+            return {"ui": {"text": ("❌ 请输入有效的包名",)}}
+        
+        # 构建pip命令
+        if operation == "install":
+            cmd = [sys.executable, "-m", "pip", "install"] + lines
+            emoji = "📦"
+            action = "安装"
+            packages_text = " ".join(lines)
+        elif operation == "uninstall":
+            # 对于卸载，需要提取基础包名（去掉版本号和额外依赖）
+            base_packages = []
+            for line in lines:
+                for pkg in line.split():
+                    # 提取基础包名：移除版本号、额外依赖等
+                    base_name = re.split(r'[><=!~\[]', pkg)[0].strip()
+                    if base_name:
+                        base_packages.append(base_name)
+            
+            if not base_packages:
+                return {"ui": {"text": ("❌ 无法提取有效的包名",)}}
+            
+            cmd = [sys.executable, "-m", "pip", "uninstall", "-y"] + base_packages
+            emoji = "🗑️"
+            action = "卸载"
+            packages_text = " ".join(base_packages)
+        else:  # upgrade
+            cmd = [sys.executable, "-m", "pip", "install", "--upgrade"] + lines
+            emoji = "⬆️"
+            action = "升级"
+            packages_text = " ".join(lines)
+        
+        # 添加卸载警告
+        warning_msg = ""
+        if operation == "uninstall":
+            warning_msg = "\n⚠️  注意：如果包正在使用中，卸载可能失败。建议重启ComfyUI后再尝试。"
+        
+        start_message = f"{emoji} 开始{action} {packages_text}...{warning_msg}\n📝 执行命令: {' '.join(cmd)}"
+        
+        # 使用通用方法执行命令
+        success, result = execute_command_with_realtime_output(
+            cmd, None, "/lg/pip_manager", True, start_message
+        )
+        
+        if isinstance(result, str):  # 中断或异常
+            return {"ui": {"text": (result,)}}
+        
+        if success:
+            success_msg = f"✅ 成功{action} {packages_text}"
+            PromptServer.instance.send_sync("/lg/pip_manager", {
+                "text": success_msg,
+                "clear": False
+            })
+            return {"ui": {"text": (success_msg,)}}
+        else:
+            error_msg = f"❌ {action}失败 (退出码: {result})"
+            PromptServer.instance.send_sync("/lg/pip_manager", {
+                "text": error_msg,
+                "clear": False
+            })
+            return {"ui": {"text": (error_msg,)}}
+
 class LG_SaveImage:
     @classmethod
     def INPUT_TYPES(s):
@@ -642,6 +832,87 @@ class LG_SaveImage:
         
         return {}
 
+class LG_InstallDependencies:
+    @classmethod
+    def INPUT_TYPES(s):
+        # 获取custom_nodes目录
+        custom_nodes_paths = folder_paths.get_folder_paths("custom_nodes")
+        custom_nodes_dir = custom_nodes_paths[0] if custom_nodes_paths else None
+        
+        # 获取所有包含requirements.txt的插件文件夹
+        plugin_folders = []
+        if custom_nodes_dir and os.path.exists(custom_nodes_dir):
+            for item in os.listdir(custom_nodes_dir):
+                item_path = os.path.join(custom_nodes_dir, item)
+                if os.path.isdir(item_path):
+                    requirements_path = os.path.join(item_path, "requirements.txt")
+                    if os.path.exists(requirements_path):
+                        plugin_folders.append(item)
+        
+        # 如果没有找到包含requirements.txt的插件，添加一个提示项
+        if not plugin_folders:
+            plugin_folders = ["未找到包含requirements.txt的插件"]
+        
+        return {
+            "required": {
+                "plugin_folder": (sorted(plugin_folders), {"tooltip": "选择要安装依赖的插件文件夹"}),
+            }
+        }
+    
+    RETURN_TYPES = ()
+    FUNCTION = "install_dependencies"
+    OUTPUT_NODE = True
+    CATEGORY = CATEGORY_TYPE
+    
+    def install_dependencies(self, plugin_folder):
+        if plugin_folder == "未找到包含requirements.txt的插件":
+            return {"ui": {"text": ("错误: 没有找到包含requirements.txt的插件文件夹",)}}
+        
+        # 获取custom_nodes目录和插件路径
+        custom_nodes_paths = folder_paths.get_folder_paths("custom_nodes")
+        custom_nodes_dir = custom_nodes_paths[0] if custom_nodes_paths else None
+        
+        if not custom_nodes_dir:
+            return {"ui": {"text": ("❌ 无法获取custom_nodes目录路径",)}}
+        
+        plugin_path = os.path.join(custom_nodes_dir, plugin_folder)
+        requirements_path = os.path.join(plugin_path, "requirements.txt")
+        
+        if not os.path.exists(plugin_path):
+            return {"ui": {"text": (f"❌ 插件目录不存在",)}}
+        
+        if not os.path.exists(requirements_path):
+            return {"ui": {"text": (f"❌ requirements.txt不存在",)}}
+        
+        import sys
+        
+        # 构建pip命令
+        cmd = [sys.executable, "-m", "pip", "install", "-r", requirements_path]
+        start_message = f"🚀 开始安装 {plugin_folder} 的依赖包...\n📝 执行命令: {' '.join(cmd)}"
+        
+        # 使用通用方法执行命令
+        success, result = execute_command_with_realtime_output(
+            cmd, plugin_path, "/lg/install_dependencies", True, start_message
+        )
+        
+        if isinstance(result, str):  # 中断或异常
+            return {"ui": {"text": (result,)}}
+        
+        if success:
+            success_msg = f"✅ 成功安装 {plugin_folder} 的依赖包"
+            PromptServer.instance.send_sync("/lg/install_dependencies", {
+                "text": success_msg,
+                "clear": False
+            })
+            return {"ui": {"text": (success_msg,)}}
+        else:
+            error_msg = f"❌ 安装失败 (退出码: {result})"
+            PromptServer.instance.send_sync("/lg/install_dependencies", {
+                "text": error_msg,
+                "clear": False
+            })
+            return {"ui": {"text": (error_msg,)}}
+
 NODE_CLASS_MAPPINGS = {
     "CachePreviewBridge": CachePreviewBridge,
     "LG_Noise": LG_Noise,
@@ -649,6 +920,8 @@ NODE_CLASS_MAPPINGS = {
     "LG_LoadImage": LG_LoadImage,
     "LG_LatentBatchToList": LG_LatentBatchToList,
     "LG_SaveImage": LG_SaveImage,
+    "LG_InstallDependencies": LG_InstallDependencies,
+    "LG_PipManager": LG_PipManager,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -657,7 +930,9 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "IPAdapterWeightTypes": "🎈IPAdapter权重类型",
     "LG_LoadImage": "🎈LG_LoadImage",
     "LG_LatentBatchToList": "🎈LG_Latent批次转列表",
-    "LG_SaveImage": "🎈LG_SaveImage"
+    "LG_SaveImage": "🎈LG_SaveImage",
+    "LG_InstallDependencies": "🎈LG_安装依赖",
+    "LG_PipManager": "🎈LG_Pip管理器",
 }
 
 

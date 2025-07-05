@@ -8,6 +8,7 @@ import folder_paths
 import base64
 import io
 import traceback
+import subprocess
 try:
     import torchvision.transforms.v2 as T
 except ImportError:
