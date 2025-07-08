@@ -913,6 +913,31 @@ class LG_InstallDependencies:
             })
             return {"ui": {"text": (error_msg,)}}
 
+class LG_FloatRange:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "value": ("FLOAT", {
+                    "default": 0.00, 
+                    "min": 0.00, 
+                    "max": 1.00, 
+                    "step": 0.01,
+                    "round": 0.01,
+                    "tooltip": "0-1范围的浮点数，精度控制在小数点后2位"
+                }),
+            }
+        }
+    
+    RETURN_TYPES = ("FLOAT",)
+    RETURN_NAMES = ("float",)
+    FUNCTION = "get_float_value"
+    CATEGORY = CATEGORY_TYPE
+    
+    def get_float_value(self, value):
+        rounded_value = round(value, 2)
+        return (rounded_value,)
+
 NODE_CLASS_MAPPINGS = {
     "CachePreviewBridge": CachePreviewBridge,
     "LG_Noise": LG_Noise,
@@ -922,6 +947,7 @@ NODE_CLASS_MAPPINGS = {
     "LG_SaveImage": LG_SaveImage,
     "LG_InstallDependencies": LG_InstallDependencies,
     "LG_PipManager": LG_PipManager,
+    "LG_FloatRange": LG_FloatRange,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
@@ -933,6 +959,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "LG_SaveImage": "🎈LG_SaveImage",
     "LG_InstallDependencies": "🎈LG_安装依赖",
     "LG_PipManager": "🎈LG_Pip管理器",
+    "LG_FloatRange": "🎈LG_浮点数[0-1]",
 }
 
 
