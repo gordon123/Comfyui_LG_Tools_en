@@ -430,6 +430,8 @@ class LG_LoadImage(LoadImage):
                     },
                 }
 
+    RETURN_TYPES = ("IMAGE", "MASK", "STRING")
+    RETURN_NAMES = ("image", "mask", "filename")
     DESCRIPTION = "从temp或output文件夹加载最新图片并复制到input文件夹。点击刷新按钮时，节点将更新图片列表并自动选择第一张图片，方便快速迭代。"
     CATEGORY = CATEGORY_TYPE
     FUNCTION = "load_image"
@@ -455,7 +457,7 @@ class LG_LoadImage(LoadImage):
                 image_tensor = torch.from_numpy(image)[None,]
         
         # 遮罩直接使用父类提取的结果，不受keep_alpha影响
-        return (image_tensor, mask_tensor)
+        return (image_tensor, mask_tensor, image)
 
 
 @PromptServer.instance.routes.get("/lg/get/latest_image")
