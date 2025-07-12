@@ -471,7 +471,7 @@ async def get_latest_image(request):
             return web.json_response({"error": f"未知的文件夹类型: {folder_type}"}, status=400)
         
         files = [f for f in os.listdir(target_dir) 
-                if os.path.isfile(os.path.join(target_dir, f)) and f.lower().endswith('.png')]
+                if os.path.isfile(os.path.join(target_dir, f)) and f.lower().endswith(('.png', '.jpg', '.jpeg', '.webp'))]
         
         if not files:
             return web.json_response({"error": f"在{folder_type}目录中未找到图像"}, status=404)
