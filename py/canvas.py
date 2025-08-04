@@ -1,6 +1,18 @@
 from .md import *
 CATEGORY_TYPE = "🎈LAOGOU/Canvas"
 
+def get_canvas_storage():
+    """获取FastCanvas节点的数据存储"""
+    if not hasattr(PromptServer.instance, '_fast_canvas_node_data'):
+        PromptServer.instance._fast_canvas_node_data = {}
+    return PromptServer.instance._fast_canvas_node_data
+
+def get_canvas_cache():
+    """获取FastCanvas节点的缓存存储"""
+    if not hasattr(PromptServer.instance, '_fast_canvas_node_cache'):
+        PromptServer.instance._fast_canvas_node_cache = {}
+    return PromptServer.instance._fast_canvas_node_cache
+
 class FastCanvasTool:
     @classmethod
     def INPUT_TYPES(cls):
@@ -86,10 +98,10 @@ def base64_to_tensor(base64_string):
 
 def toBase64ImgUrl(img):
     bytesIO = BytesIO()
-    img.save(bytesIO, format="PNG")
+    img.save(bytesIO, format="jpeg")
     img_types = bytesIO.getvalue()
     img_base64 = base64.b64encode(img_types)
-    return f"data:image/png;base64,{img_base64.decode('utf-8')}"
+    return f"data:image/jpeg;base64,{img_base64.decode('utf-8')}"
 
 def tensor_to_base64(tensor):
     if len(tensor.shape) == 3:
@@ -109,9 +121,9 @@ def tensor_to_base64(tensor):
     array = np.ascontiguousarray(array)
     
     try:
-        success, buffer = cv2.imencode('.png', array)
+        success, buffer = cv2.imencode('.jpeg', array)
         if success:
-            return f"data:image/png;base64,{base64.b64encode(buffer).decode('utf-8')}"
+            return f"data:image/jpeg;base64,{base64.b64encode(buffer).decode('utf-8')}"
     except Exception as e:
         print(f"Error encoding image: {e}")
         print(f"Array shape: {array.shape}, dtype: {array.dtype}")
@@ -129,28 +141,13 @@ async def handle_canvas_data(request):
             print("[FastCanvas] Missing node_id")
             return web.json_response({"status": "error", "message": "Missing node_id"}, status=400)
 
-        print(f"[FastCanvas] 当前活动节点总数: {len(FastCanvas.active_nodes)}")
+        canvas_storage = get_canvas_storage()
         
-        waiting_node = None
-        print(f"[FastCanvas] 开始查找节点 {node_id} 的等待状态")
-        
-        for i, node in enumerate(FastCanvas.active_nodes):
-            event_status = "等待中" if node.waiting_for_response else "已响应"
-            node_id_str = getattr(node, 'node_id', '未知')
-            print(f"[FastCanvas] 节点[{i}] - ID: {node_id_str}, 状态: {event_status}")
-            
-            if node.waiting_for_response and node.node_id == node_id:
-                waiting_node = node
-                print(f"[FastCanvas] 找到等待响应的节点: {node_id_str}")
-                break
-
-        if not waiting_node:
+        if node_id not in canvas_storage:
             print(f"[FastCanvas] 没有找到等待响应的节点")
-            print(f"[FastCanvas] 请求的节点ID: {node_id}")
-            print(f"[FastCanvas] 活动节点列表: {[getattr(node, 'node_id', '未知') for node in FastCanvas.active_nodes]}")
             return web.Response(status=200)
             
-        print(f"[FastCanvas] 成功找到等待节点，准备处理数据")
+        print(f"[FastCanvas] 成功等待节点，准备处理数据")
         transform_data = data.get('layer_transforms', {})
         main_image = array_to_tensor(data.get('main_image'), "image")
         main_mask = array_to_tensor(data.get('main_mask'), "mask")
@@ -161,9 +158,9 @@ async def handle_canvas_data(request):
             'transform_data': transform_data
         }
 
-        waiting_node.processed_data = processed_data
-        waiting_node.response_event.set()
-        print(f"[FastCanvas] 已完成数据处理并通知节点 {node_id}")
+        node_info = canvas_storage[node_id]
+        node_info["processed_data"] = processed_data
+        node_info["event"].set()
 
         return web.json_response({"status": "success"})
 
@@ -173,35 +170,27 @@ async def handle_canvas_data(request):
         traceback.print_exc()
         return web.json_response({"status": "error", "message": str(e)}, status=500)
 
-
-# 存储活动的 FastCanvas 节点
-active_canvas_nodes = []
-
 class FastCanvas:
-    # 将活动节点列表移到类属性
-    active_nodes = []
+
     
     def __init__(self):
-        self.response_event = Event()
-        self.processed_data = None
         self.node_id = None
-        self.waiting_for_response = False
-        
-        # 清理已有节点并添加自己
-        FastCanvas.clean_nodes()
-        FastCanvas.active_nodes.append(self)
-        print(f"[FastCanvas] 新节点已创建，当前活动节点数: {len(FastCanvas.active_nodes)}")
 
     @classmethod
     def clean_nodes(cls):
-        """清理非活动节点"""
-        cls.active_nodes = [node for node in cls.active_nodes 
-                          if node.waiting_for_response and hasattr(node, 'response_event')]
+        """清理过期节点"""
+        canvas_storage = get_canvas_storage()
+        expired_nodes = []
+        for node_id, node_info in canvas_storage.items():
+            if not node_info["waiting_for_response"]:
+                expired_nodes.append(node_id)
+        
+        for node_id in expired_nodes:
+            del canvas_storage[node_id]
     
     @classmethod
     def INPUT_TYPES(cls):
-        # 每次加载节点类型时重置活动节点列表
-        cls.active_nodes = []
+
         return {
             "required": {},
             "hidden": {"unique_id": "UNIQUE_ID"},
@@ -217,18 +206,18 @@ class FastCanvas:
     def canvas_execute(self, unique_id, fc_data=None):
         try:
             self.node_id = unique_id
-            self.response_event.clear()
-            self.processed_data = None
-            self.waiting_for_response = True
-            
-            # 确保节点在活动列表中
-            if self not in FastCanvas.active_nodes:
-                FastCanvas.active_nodes.append(self)
-            
-            print(f"[FastCanvas] 节点 {unique_id} 开始等待响应")
+
+            canvas_storage = get_canvas_storage()
+            event = Event()
+
+            canvas_storage[unique_id] = {
+                "event": event,
+                "processed_data": None,
+                "waiting_for_response": True
+            }
+
 
             if fc_data is not None and (not hasattr(self, 'last_fc_data') or self.last_fc_data != fc_data):
-                print(f"[FastCanvas] 发送新数据到前端，节点ID: {unique_id}")
                 PromptServer.instance.send_sync(
                     "fast_canvas_update", {
                         "node_id": unique_id,
@@ -237,26 +226,29 @@ class FastCanvas:
                 )
                 self.last_fc_data = fc_data
             else:
-                print(f"[FastCanvas] 直接获取画布状态，节点ID: {unique_id}")
                 PromptServer.instance.send_sync(
                     "fast_canvas_get_state", {
                         "node_id": unique_id
                     }
                 )
 
-            if not self.response_event.wait(timeout=30):
-                print(f"[FastCanvas] 等待前端响应超时")
-                self.waiting_for_response = False
+            if not event.wait(timeout=30):
+                if unique_id in canvas_storage:
+                    canvas_storage[unique_id]["waiting_for_response"] = False
                 FastCanvas.clean_nodes()
                 return None, None, None
 
-            self.waiting_for_response = False
+            node_info = canvas_storage.get(unique_id, {})
+            processed_data = node_info.get("processed_data")
+            
+            if unique_id in canvas_storage:
+                canvas_storage[unique_id]["waiting_for_response"] = False
             FastCanvas.clean_nodes()
             
-            if self.processed_data:
-                image = self.processed_data.get('image')
-                mask = self.processed_data.get('mask')
-                transform_data = self.processed_data.get('transform_data', {})
+            if processed_data:
+                image = processed_data.get('image')
+                mask = processed_data.get('mask')
+                transform_data = processed_data.get('transform_data', {})
                 
                 if image is not None:
                     bg_height, bg_width = image.shape[1:3]
@@ -271,14 +263,18 @@ class FastCanvas:
 
         except Exception as e:
             print(f"[FastCanvas] 处理过程发生异常: {str(e)}")
-            self.waiting_for_response = False
+            canvas_storage = get_canvas_storage()
+            if unique_id in canvas_storage:
+                canvas_storage[unique_id]["waiting_for_response"] = False
             FastCanvas.clean_nodes()
             return None, None, None
 
     def __del__(self):
-        if self in FastCanvas.active_nodes:
-            FastCanvas.active_nodes.remove(self)
-            print(f"[FastCanvas] 节点 {self.node_id} 已移除，剩余节点数: {len(FastCanvas.active_nodes)}")
+        # 确保从存储中删除节点数据
+        canvas_storage = get_canvas_storage()
+        if self.node_id and self.node_id in canvas_storage:
+            del canvas_storage[self.node_id]
+
 
 def array_to_tensor(array_data, data_type):
 

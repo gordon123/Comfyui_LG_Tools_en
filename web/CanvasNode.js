@@ -1,6 +1,6 @@
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
-import { fabric } from "./lib/fabric.js";  // 请确保 fabric.js 已被正确导入
+import { fabric } from "./lib/fabric-slim.min.js";  // 使用精简版fabric.js以提高性能
 
 // 定义常量
 const CANVAS_SIZE = {
@@ -168,20 +168,12 @@ class FastCanvas {
             {
                 text: '调整图层',
                 submenu: [
-                    { text: '置于顶层', action: () => {
-                        const obj = this.canvas.getActiveObject();
-                        if (obj) {
-                            obj.bringToFront();
-                            this.canvas.renderAll();
-                            this.requestStateUpdate();
-                        }
-                    }},
                     { text: '上移一层', action: () => {
                         const obj = this.canvas.getActiveObject();
                         if (obj) {
                             obj.bringForward();
                             this.canvas.renderAll();
-                            this.requestStateUpdate();
+
                         }
                     }},
                     { text: '下移一层', action: () => {
@@ -189,7 +181,15 @@ class FastCanvas {
                         if (obj) {
                             obj.sendBackwards();
                             this.canvas.renderAll();
-                            this.requestStateUpdate();
+
+                        }
+                    }},
+                    { text: '置于顶层', action: () => {
+                        const obj = this.canvas.getActiveObject();
+                        if (obj) {
+                            obj.bringToFront();
+                            this.canvas.renderAll();
+
                         }
                     }},
                     { text: '置于底层', action: () => {
@@ -197,11 +197,27 @@ class FastCanvas {
                         if (obj) {
                             obj.sendToBack();
                             this.canvas.renderAll();
-                            this.requestStateUpdate();
+
                         }
                     }}
                 ]
             },
+            {
+                text: '混合模式',
+                submenu: [
+                    { text: '正常 (source-over)', action: () => this.setObjectCompositeMode('source-over') },
+                    { text: '正片叠底 (multiply)', action: () => this.setObjectCompositeMode('multiply') },
+                    { text: '滤色 (screen)', action: () => this.setObjectCompositeMode('screen') },
+                    { text: '叠加 (overlay)', action: () => this.setObjectCompositeMode('overlay') },
+                    { text: '变亮 (lighten)', action: () => this.setObjectCompositeMode('lighten') },
+                    { text: '变暗 (darken)', action: () => this.setObjectCompositeMode('darken') },
+                    { text: '强光 (hard-light)', action: () => this.setObjectCompositeMode('hard-light') },
+                    { text: '柔光 (soft-light)', action: () => this.setObjectCompositeMode('soft-light') },
+                    { text: '差值 (difference)', action: () => this.setObjectCompositeMode('difference') },
+                    { text: '排除 (exclusion)', action: () => this.setObjectCompositeMode('exclusion') },
+                ]
+            },
+            { text: '调整透明度', action: () => this.showOpacityDialog() },
             { text: '恢复原尺寸', action: () => this.resetObjectSize() }
         ];
         
@@ -378,26 +394,187 @@ class FastCanvas {
 
     resetObjectSize() {
         const activeObject = this.canvas.getActiveObject();
-        const backgroundImage = this.canvas.backgroundImage;
-        
-        if (activeObject && backgroundImage) {
-            const scaleRatio = backgroundImage.width / backgroundImage.getScaledWidth();
-            const center = activeObject.getCenterPoint();
+        if (activeObject && activeObject.originalWidth && activeObject.originalHeight) {
+            // 重置对象到原始尺寸
+            const originalWidth = activeObject.originalWidth;
+            const originalHeight = activeObject.originalHeight;
             
+            // 计算比例
+            const scaleX = originalWidth / activeObject.width;
+            const scaleY = originalHeight / activeObject.height;
+            
+            // 应用变换
             activeObject.set({
-                scaleX: 1 / scaleRatio,
-                scaleY: 1 / scaleRatio
+                scaleX: 1,
+                scaleY: 1,
+                width: originalWidth,
+                height: originalHeight
             });
             
-            activeObject.setPositionByOrigin(center, 'center', 'center');
-            activeObject.setCoords();
             this.canvas.renderAll();
 
-            // 更新右上角缩放值显示
-            const relativeScale = 1.0;  // 恢复原尺寸时，相对缩放比例为1
-            this.scaleText.innerHTML = `scale: ${relativeScale}×`;
-            this.scaleText.style.display = 'block';
         }
+    }
+    
+    // 设置图层混合模式
+    setObjectCompositeMode(mode) {
+        const activeObject = this.canvas.getActiveObject();
+        if (activeObject) {
+            activeObject.set({
+                globalCompositeOperation: mode
+            });
+            this.canvas.renderAll();
+
+        }
+    }
+    
+    // 显示透明度调整对话框
+    showOpacityDialog() {
+        const activeObject = this.canvas.getActiveObject();
+        if (!activeObject) return;
+        
+        // 创建对话框元素
+        const dialog = document.createElement('div');
+        dialog.className = 'opacity-dialog';
+        dialog.style.cssText = `
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #2a2a2a;
+            border: 1px solid #3f3f3f;
+            border-radius: 6px;
+            padding: 15px;
+            z-index: 1000;
+            color: white;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            min-width: 250px;
+        `;
+        
+        // 创建滑动条
+        const slider = document.createElement('input');
+        slider.type = 'range';
+        slider.min = '0';
+        slider.max = '100';
+        slider.value = Math.round(activeObject.opacity * 100);
+        slider.style.cssText = `
+            width: 100%;
+            margin: 5px 0;
+        `;
+        
+        // 当前透明度值显示
+        const valueDisplay = document.createElement('div');
+        valueDisplay.style.cssText = `
+            margin: 5px 0;
+            text-align: center;
+            font-size: 14px;
+        `;
+        valueDisplay.textContent = `${Math.round(activeObject.opacity * 100)}%`;
+        
+        // 滑动时实时更新透明度
+        slider.addEventListener('input', (e) => {
+            const opacity = parseInt(e.target.value) / 100;
+            activeObject.set({ opacity });
+            valueDisplay.textContent = `${Math.round(opacity * 100)}%`;
+            this.canvas.renderAll();
+        });
+        
+        // 按钮容器
+        const buttonContainer = document.createElement('div');
+        buttonContainer.style.cssText = `
+            display: flex;
+            justify-content: space-between;
+            margin-top: 10px;
+        `;
+        
+        // 关闭对话框函数
+        const closeDialog = () => {
+            activeObject.set({ opacity: activeObject._originalOpacity });
+            try {
+                document.body.removeChild(dialog);
+                // 移除ESC键监听器
+                document.removeEventListener('keydown', handleKeyDown);
+            } catch (error) {
+                console.log("对话框已被移除");
+            }
+            this.canvas.renderAll();
+        };
+        
+        // 应用更改并关闭对话框
+        const applyChanges = () => {
+            try {
+                document.body.removeChild(dialog);
+                // 移除所有事件监听器
+                document.removeEventListener('keydown', handleKeyDown);
+                document.removeEventListener('mousedown', handleClickOutside);
+            } catch (error) {
+                console.log("对话框已被移除");
+            }
+
+        };
+        
+        // ESC键监听器
+        const handleKeyDown = (e) => {
+            if (e.key === 'Escape') {
+                closeDialog();
+            }
+        };
+        
+        // 添加ESC键监听
+        document.addEventListener('keydown', handleKeyDown);
+        
+        // 取消按钮
+        const cancelButton = document.createElement('button');
+        cancelButton.textContent = '取消';
+        cancelButton.style.cssText = `
+            background: #444;
+            border: none;
+            color: white;
+            padding: 5px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+        `;
+        cancelButton.onclick = closeDialog;
+        
+        // 确认按钮
+        const confirmButton = document.createElement('button');
+        confirmButton.textContent = '确认';
+        confirmButton.style.cssText = `
+            background: #007bff;
+            border: none;
+            color: white;
+            padding: 5px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+        `;
+        confirmButton.onclick = applyChanges;
+        
+        // 添加所有元素
+        dialog.appendChild(valueDisplay);
+        dialog.appendChild(slider);
+        buttonContainer.appendChild(cancelButton);
+        buttonContainer.appendChild(confirmButton);
+        dialog.appendChild(buttonContainer);
+        
+        // 保存原始透明度以便取消时恢复
+        activeObject._originalOpacity = activeObject.opacity;
+        
+        // 添加到文档
+        document.body.appendChild(dialog);
+        
+        // 在函数内部创建并存储mousedown监听器的引用
+        let handleClickOutside;
+
+        // 定义并存储监听器引用
+        handleClickOutside = function(e) {
+            if (!dialog.contains(e.target)) {
+                closeDialog();
+                document.removeEventListener('mousedown', handleClickOutside);
+            }
+        };
+
+        // 添加监听器
+        document.addEventListener('mousedown', handleClickOutside);
     }
 
     updateContainerSize(width, height) {
@@ -570,7 +747,7 @@ class FastCanvas {
                     
                     this.canvas.renderAll();
                     this.controlPanel.updateLayerSelector();
-                    console.log('已复制选中的图层');
+
                 }
             }
         });
@@ -705,7 +882,7 @@ class FastCanvas {
                 
                 this.canvas.setActiveObject(img);
                 this.canvas.renderAll();
-                this.requestStateUpdate();
+
             });
     
         } catch (error) {
@@ -741,57 +918,9 @@ class FastCanvas {
         });
     }
 
-    requestStateUpdate() {
-        requestAnimationFrame(async () => {
-            if (!this.canvas || this.canvas.isEmpty()) return;
-            
-            // 只在画布真正变化时更新种子
-            if (this.hasCanvasChanged()) {
-                if (this.node && typeof this.node.updateSeed === 'function') {
-                    this.node.updateSeed();
-                }
-                
-                this.canvas.renderAll();
-
-            }
-        });
-    }
     
     setupEventListeners() {
-        // 开始拖拽
-        this.canvas.on('mouse:down', (event) => {
-            const activeObject = this.canvas.getActiveObject();
-            if (activeObject) {
-                this.isDragging = true;
-            }
-        });
-    
-        // 结束拖拽
-        this.canvas.on('mouse:up', (event) => {
-            if (this.isDragging) {
-                this.isDragging = false;
-                this.requestStateUpdate(); // 只在拖拽结束时更新状态
-            }
-        });
-    
-        // 监听图层添加/删除
-        this.canvas.on('object:added', () => {
-            this.requestStateUpdate();
-        });
-    
-        this.canvas.on('object:removed', () => {
-            this.requestStateUpdate();
-        });
-    
-        // 监听所有对象修改
-        this.canvas.on('object:modified', () => {
-            this.requestStateUpdate();
-        });
-    
-        // 监听背景变化
-        this.canvas.on('background:modified', () => {
-            this.requestStateUpdate();
-        });
+
         // 添加一个计算相对缩放值的辅助方法
         const getRelativeScale = (obj) => {
             const backgroundImage = this.canvas.backgroundImage;
@@ -832,15 +961,12 @@ class FastCanvas {
                         this.canvas.remove(activeObject);
                         this.canvas.renderAll();
                         
-                        // 触发状态更新
-                        this.requestStateUpdate();
+
                     }
                 }
             }
         };
 
-        // 添加事件监听器
-        document.addEventListener('keydown', this._handleKeyDown);
         // 添加滚轮缩放
         this.canvas.on('mouse:wheel', (opt) => {
             const delta = opt.e.deltaY;
@@ -859,7 +985,7 @@ class FastCanvas {
                 scale = Math.min(Math.max(scale, 0.01), 10);
 
                 activeObject.scale(scale);
-                this.canvas.requestRenderAll();
+                this.canvas.renderAll();
 
                 // 更新缩放值显示
                 const relativeScale = getRelativeScale(activeObject);
@@ -870,34 +996,8 @@ class FastCanvas {
                 opt.e.stopPropagation();
             }
         });
-
     }
 
-    hasCanvasChanged() {
-        if (!this.canvas) return false;
-
-        const currentState = {
-            objects: this.canvas.getObjects().map(obj => ({
-                id: obj.id,
-                left: obj.left,
-                top: obj.top,
-                scaleX: obj.scaleX,
-                scaleY: obj.scaleY,
-                angle: obj.angle
-            })),
-            background: this.background?.fill,
-            selectedId: this.canvas.getActiveObject()?.id
-        };
-
-        const stateJSON = JSON.stringify(currentState);
-        const hasChanged = !this.lastCanvasState || stateJSON !== this.lastCanvasState;
-
-        if (hasChanged) {
-            this.lastCanvasState = stateJSON;
-        }
-
-        return hasChanged;
-    }
 
     async updateCanvas(canvasData) {
         if (!canvasData) return;
@@ -957,7 +1057,7 @@ class FastCanvas {
                 (img) => {
                     clearTimeout(timeoutId);
                     if (!img) {
-                        console.error("[FastCanvas] Failed to create image from URL");
+
                         reject(new Error('Failed to create image'));
                         return;
                     }
@@ -965,7 +1065,6 @@ class FastCanvas {
                 },
                 (error) => {
                     clearTimeout(timeoutId);
-                    console.error("[FastCanvas] Error loading image:", error);
                     reject(error);
                 },
                 { crossOrigin: 'anonymous' }  // 添加跨域支持
@@ -992,12 +1091,10 @@ class FastCanvas {
 
     async setBackground(backgroundData) {
         if (!backgroundData?.image) {
-            console.log("[FastCanvas] No background image data");
             return;
         }
     
         try {
-            console.log("[FastCanvas] Loading background image...");
             const img = await this.loadImage(backgroundData.image);
             
             // 保存当前所有图层的状态
@@ -1066,15 +1163,14 @@ class FastCanvas {
                     layerStates.forEach(({object, state}) => {
                         object.set(state);
                     });
-                    
-                    console.log("[FastCanvas] Background set successfully");
+
                     this.canvas.renderAll();
                     resolve();
                 });
             });
             
         } catch (error) {
-            console.error("[FastCanvas] Background loading failed:", error);
+
             this.sendErrorState("Background loading failed");
         }
     }
@@ -1084,7 +1180,7 @@ class FastCanvas {
         return new Promise((resolve) => {
             fabric.Image.fromURL(layerData.image, (img) => {
                 if (!img) {
-                    console.error("[FastCanvas] Failed to load layer image:", layerData.id);
+
                     resolve();
                     return;
                 }
@@ -1199,7 +1295,7 @@ class FastCanvas {
             }
 
             if (removePromises.length > 0) {
-                console.log("[FastCanvas] Removing old layers");
+
                 await Promise.all(removePromises);
                 this.canvas.renderAll();
             }
@@ -1232,12 +1328,12 @@ class FastCanvas {
         }
     }
 
-    async getLayerMask(selectedLayer, ignoreOcclusion = false) {  // 添加参数控制是否忽略遮挡
+    async getLayerMask(selectedLayer, ignoreOcclusion = false) {
         if (!selectedLayer || !this.canvas.backgroundImage) {
             return null;
         }
     
-        // 1. 创建与原始画布相同尺寸的遮罩画布
+        // 创建与原始画布相同尺寸的遮罩画布
         const maskCanvas = document.createElement('canvas');
         maskCanvas.width = this.originalSize.width;
         maskCanvas.height = this.originalSize.height;
@@ -1250,7 +1346,7 @@ class FastCanvas {
         if (selectedLayer.visible !== false) {
             ctx.save();
             
-            // 直接使用图层的变换矩阵，不需要缩放调整
+            // 直接使用图层的变换矩阵
             const matrix = selectedLayer.calcTransformMatrix();
             ctx.transform(
                 matrix[0],
@@ -1261,7 +1357,7 @@ class FastCanvas {
                 matrix[5]
             );
     
-            // 绘制图层
+            // 绘制图层 - 图像对象
             if (selectedLayer._element) {
                 ctx.drawImage(
                     selectedLayer._element,
@@ -1271,11 +1367,29 @@ class FastCanvas {
                     selectedLayer.height
                 );
             }
-    
+            else if (selectedLayer.type === 'text' || selectedLayer.type === 'i-text') {
+                // 设置文本样式
+                ctx.fillStyle = 'white';
+                ctx.font = `${selectedLayer.fontSize}px ${selectedLayer.fontFamily}`;
+                ctx.textAlign = 'left';
+                ctx.textBaseline = 'top';
+                
+                // 处理行间距和多行文本
+                const lines = selectedLayer.text.split('\n');
+                const lineHeight = selectedLayer.lineHeight || 1.16; // Fabric默认值
+                
+                for (let i = 0; i < lines.length; i++) {
+                    // 计算每行Y位置，考虑行高
+                    const y = -selectedLayer.height / 2 + i * lineHeight * selectedLayer.fontSize + lineHeight*1.8;
+                    
+                    // 绘制每行文本，保留字间距处理
+                    ctx.fillText(lines[i], -selectedLayer.width / 2, y);
+                }
+            }
             ctx.restore();
         }
     
-        // 2. 只在需要时处理上层遮挡
+        // 上层遮挡处理部分也需要修改
         if (!ignoreOcclusion) {
             const allLayers = this.canvas.getObjects()
                 .filter(obj => obj !== this.canvas.backgroundImage);
@@ -1291,12 +1405,8 @@ class FastCanvas {
                         
                         const matrix = layer.calcTransformMatrix();
                         ctx.transform(
-                            matrix[0],
-                            matrix[1],
-                            matrix[2],
-                            matrix[3],
-                            matrix[4],
-                            matrix[5]
+                            matrix[0], matrix[1], matrix[2],
+                            matrix[3], matrix[4], matrix[5]
                         );
     
                         if (layer._element) {
@@ -1308,7 +1418,25 @@ class FastCanvas {
                                 layer.height
                             );
                         }
-    
+                        else if (layer.type === 'text' || layer.type === 'i-text') {
+                            // 设置文本样式
+                            ctx.fillStyle = 'white';
+                            ctx.font = `${layer.fontSize}px ${layer.fontFamily}`;
+                            ctx.textAlign = 'left';
+                            ctx.textBaseline = 'top';
+                            
+                            // 处理行间距和多行文本
+                            const lines = layer.text.split('\n');
+                            const lineHeight = layer.lineHeight || 1.16; // Fabric默认值
+                            
+                            for (let i = 0; i < lines.length; i++) {
+                                // 计算每行Y位置，考虑行高
+                                const y = -selectedLayer.height / 2 + i * lineHeight * selectedLayer.fontSize + lineHeight*1.8;
+                                
+                                // 绘制每行文本，保留字间距处理
+                                ctx.fillText(lines[i], -layer.width / 2, y);
+                            }
+                        }
                         ctx.restore();
                     }
                 });
@@ -1320,21 +1448,13 @@ class FastCanvas {
 
     async sendCanvasState() {
         if (!this.canvas) {
-            console.log('[FastCanvas] 画布未初始化');
+
             return;
         }
 
         try {
             const timestamp = Date.now();
-            
-            console.log('[FastCanvas] 画布信息:', {
-                '画布元素尺寸': `${this.canvas.width}x${this.canvas.height}`,
-                '画布渲染尺寸': `${this.canvas.getWidth()}x${this.canvas.getHeight()}`,
-                '期望输出尺寸': `${this.originalSize.width}x${this.originalSize.height}`,
-                '设备像素比': window.devicePixelRatio,
-                '缩放级别': this.canvas.getZoom()
-            });
-    
+
             // 创建临时画布来处理尺寸
             const tempCanvas = document.createElement('canvas');
             tempCanvas.width = this.originalSize.width;
@@ -1364,13 +1484,9 @@ class FastCanvas {
             const imageBlob = await new Promise(resolve => {
                 tempCanvas.toBlob(async (blob) => {
                     const tempImg = await createImageBitmap(blob);
-                    console.log('[FastCanvas] 处理后的图像尺寸:', {
-                        '宽度': tempImg.width,
-                        '高度': tempImg.height,
-                        'Blob大小': blob.size
-                    });
+
                     resolve(blob);
-                }, 'image/png', 1.0);
+                }, 'image/jpeg', 1.0);
             });
     
             // 将Blob转换为ArrayBuffer
@@ -1448,15 +1564,7 @@ class FastCanvas {
                 main_mask: Array.from(new Uint8Array(maskBuffer)),
                 layer_transforms: layerTransforms  // 替换原来的 layer_masks
             };
-    
-            // 更新调试信息
-            console.log('[FastCanvas] 准备发送数据到后端:', {
-                节点ID: data.node_id,
-                时间戳: data.timestamp,
-                主图大小: data.main_image.length,
-                主遮罩大小: data.main_mask.length,
-                变换信息数量: Object.keys(data.layer_transforms).length
-            });
+
     
             // 发送数据
             const response = await api.fetchApi('/fast_canvas_all', {
@@ -1538,8 +1646,6 @@ class FastCanvas {
     
         // 强制更新节点
         this.node.setDirtyCanvas(true, true);
-    
-        return this;
     }
     // 添加清理方法
     cleanup() {
@@ -1568,122 +1674,7 @@ class FastCanvas {
         this.canvas = null;
         this.canvasContainer = null;
     }
-    // 序列化方法
-    serialize() {
-        if (!this.canvas) return null;
-        
-        // 获取所有对象的状态
-        const objects = this.canvas.getObjects().map(obj => {
-            const state = {
-                id: obj.id,
-                type: obj.type,
-                left: obj.left,
-                top: obj.top,
-                scaleX: obj.scaleX,
-                scaleY: obj.scaleY,
-                angle: obj.angle,
-                flipX: obj.flipX,
-                flipY: obj.flipY,
-                visible: obj.visible,
-                selectable: obj.selectable,
-                hasControls: obj.hasControls,
-                hasBorders: obj.hasBorders
-            };
 
-            // 如果是图片对象，添加图片数据
-            if (obj.type === 'image') {
-                state.image = obj.getSrc();
-            }
-
-            return state;
-        });
-
-        // 获取背景状态
-        const background = this.canvas.backgroundImage;
-        const backgroundState = background ? {
-            type: background.type,
-            fill: background.fill,
-            width: background.width,
-            height: background.height,
-            // 如果是图片类型，保存图片数据
-            image: background.type === 'image' ? background.getSrc() : null
-        } : null;
-
-        // 返回序列化数据
-        return {
-            originalSize: this.originalSize,
-            maxDisplaySize: this.maxDisplaySize,
-            objects: objects,
-            background: backgroundState
-        };
-    }
-
-    // 反序列化方法
-    async deserialize(data) {
-        if (!data || !this.canvas) return;
-
-        // 恢复原始尺寸
-        this.originalSize = data.originalSize;
-        this.maxDisplaySize = data.maxDisplaySize;
-
-        // 清空画布
-        this.canvas.clear();
-
-        // 恢复背景
-        if (data.background) {
-            if (data.background.type === 'rect') {
-                const bg = new fabric.Rect({
-                    width: data.background.width,
-                    height: data.background.height,
-                    fill: data.background.fill,
-                    selectable: false,
-                    evented: false,
-                    excludeFromExport: false
-                });
-                this.canvas.setBackgroundImage(bg);
-                this.background = bg;
-            } else if (data.background.type === 'image' && data.background.image) {
-                // 处理图片类型的背景
-                try {
-                    const img = await this.loadImage(data.background.image);
-                    img.set({
-                        width: data.background.width,
-                        height: data.background.height,
-                        selectable: false,
-                        evented: false,
-                        excludeFromExport: false
-                    });
-                    this.canvas.setBackgroundImage(img);
-                    this.background = img;
-                } catch (error) {
-                    console.error("[FastCanvas] 背景图片加载失败:", error);
-                }
-            }
-        }
-
-        // 恢复其他对象
-        if (data.objects) {
-            for (const objData of data.objects) {
-                if (objData.type === 'image' && objData.image) {
-                    try {
-                        const img = await this.loadImage(objData.image);
-                        img.set(objData);
-                        this.canvas.add(img);
-                    } catch (error) {
-                        console.error("[FastCanvas] 图层图片加载失败:", error);
-                    }
-                }
-            }
-        }
-
-        // 更新画布尺寸和缩放
-        const scaledSize = this.calculateScaledSize(
-            this.originalSize.width,
-            this.originalSize.height,
-            this.maxDisplaySize
-        );
-        this.updateCanvasSize(scaledSize.width, scaledSize.height);
-    }
 }
 
 
@@ -1696,6 +1687,7 @@ class ControlPanel {
         this.container = this.createContainer();
         this.currentLayerId = null; // 当前选中的图层ID
         this.maxLayerId = 0; // 最大图层ID
+        this.textPanelVisible = false; // 文字面板可见性状态
         this.initializeControls();
     }
 
@@ -1747,7 +1739,7 @@ class ControlPanel {
     }
 
     // 创建数字输入框
-    createNumberInput(placeholder, defaultValue, onChange) {
+    createNumberInput(placeholder, defaultValue, onInput) {
         const input = document.createElement('input');
         input.type = 'number';
         input.placeholder = placeholder;
@@ -1787,13 +1779,13 @@ class ControlPanel {
         document.head.appendChild(style);
 
         input.dataset.defaultValue = defaultValue;
-        input.onchange = (e) => {
+        input.oninput = (e) => {
             const value = parseInt(e.target.value);
             if (value > 0) {
-                onChange(e);
+                onInput(e);
             } else {
                 e.target.value = input.dataset.defaultValue;
-                onChange({ target: { value: input.dataset.defaultValue } });
+                onInput({ target: { value: input.dataset.defaultValue } });
             }
         };
         return input;
@@ -2068,6 +2060,424 @@ class ControlPanel {
         return container;
     }
 
+    // 创建文字功能面板
+    createTextPanel() {
+        const panel = document.createElement('div');
+        panel.className = 'text-function-panel';
+        panel.style.cssText = `
+            position: absolute;
+            top: calc(100% + 5px);
+            left: 0;
+            width: 100%;
+            background-color: #353535;
+            padding: 10px;
+            display: none;
+            flex-wrap: wrap;
+            gap: 10px;
+            border-top: 1px solid #666;
+            border-radius: 8px;
+            z-index: 100;
+            box-sizing: border-box;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+        `;
+        
+        // 添加文字按钮
+        const addTextBtn = this.createButton('添加文字', () => {
+            const text = new fabric.IText('双击编辑文字', {
+                fontSize: 48,
+                fill: '#ffffff',
+                fontFamily: 'Arial',
+                originX: 'center',
+                originY: 'center'
+            });
+            
+            // 为新添加的文本对象分配ID
+            this.maxLayerId++;
+            text.id = this.maxLayerId;
+            
+            // 获取画布中心点
+            const canvasCenter = this.canvas.getCenter();
+            text.set({
+                left: canvasCenter.left,
+                top: canvasCenter.top
+            });
+            
+            this.canvas.add(text);
+            this.canvas.setActiveObject(text);
+            this.currentLayerId = text.id;
+            this.updateLayerSelector();
+            this.canvas.renderAll();
+        });
+        
+        // 字体选择器
+        const fontSelector = document.createElement('select');
+        fontSelector.style.cssText = `
+            padding: 5px 10px;
+            height: 28px;
+            background: #444;
+            border: 1px solid #666;
+            color: #fff;
+            border-radius: 4px;
+            min-width: 100px;
+        `;
+        
+        const fonts = ['Arial', 'Times New Roman', 'Courier New', '宋体', '黑体', '微软雅黑'];
+        fonts.forEach(font => {
+            const option = document.createElement('option');
+            option.value = font;
+            option.textContent = font;
+            fontSelector.appendChild(option);
+        });
+        
+        fontSelector.oninput = () => {
+            const activeObj = this.canvas.getActiveObject();
+            if (activeObj && activeObj.type === 'i-text') {
+                activeObj.set('fontFamily', fontSelector.value);
+                this.canvas.renderAll();
+            }
+        };
+        
+        // 字号选择器
+        const sizeSelector = document.createElement('select');
+        sizeSelector.style.cssText = `
+            padding: 5px 10px;
+            height: 28px;           
+            background: #444;
+            border: 1px solid #666;
+            color: #fff;
+            border-radius: 4px;
+            min-width: 60px;
+        `;
+        
+        const sizes = [12, 14, 16, 18, 20, 24, 28, 32, 36, 42, 48, 56, 64, 72];
+        sizes.forEach(size => {
+            const option = document.createElement('option');
+            option.value = size;
+            option.textContent = size;
+            sizeSelector.appendChild(option);
+        });
+        
+        sizeSelector.oninput = () => {
+            const activeObj = this.canvas.getActiveObject();
+            if (activeObj && activeObj.type === 'i-text') {
+                activeObj.set('fontSize', parseInt(sizeSelector.value));
+                this.canvas.renderAll();
+            }
+        };
+        
+        // 文字颜色选择器
+        const colorPicker = document.createElement('input');
+        colorPicker.type = 'color';
+        colorPicker.value = '#ffffff';
+        colorPicker.style.cssText = `
+            width: 28px;
+            height: 28px;
+            padding: 0;
+            border: 1px solid #666;
+            border-radius: 4px;
+            background: #444;
+            cursor: pointer;
+        `;
+        
+        colorPicker.oninput = () => {
+            const activeObj = this.canvas.getActiveObject();
+            if (activeObj && activeObj.type === 'i-text') {
+                activeObj.set('fill', colorPicker.value);
+                this.canvas.renderAll();
+            }
+        };
+        
+        // 背景色选择器
+        const bgColorPicker = document.createElement('input');
+        bgColorPicker.type = 'color';
+        bgColorPicker.value = '#000000';
+        bgColorPicker.style.cssText = `
+            width: 28px;
+            height: 28px;
+            padding: 0;
+            border: 1px solid #666;
+            border-radius: 4px;
+            background: #444;
+            cursor: pointer;
+        `;
+        
+        const bgColorLabel = document.createElement('span');
+        bgColorLabel.textContent = '背景';
+        bgColorLabel.style.cssText = `
+            color: #fff;
+            font-size: 12px;
+            margin-right: 4px;
+        `;
+        
+        const bgColorContainer = document.createElement('div');
+        bgColorContainer.style.cssText = `
+            display: flex;
+            align-items: center;
+        `;
+        bgColorContainer.appendChild(bgColorLabel);
+        bgColorContainer.appendChild(bgColorPicker);
+        
+        bgColorPicker.oninput = () => {
+            const activeObj = this.canvas.getActiveObject();
+            if (activeObj && activeObj.type === 'i-text') {
+                activeObj.set('backgroundColor', bgColorPicker.value);
+                this.canvas.renderAll();
+            }
+        };
+        
+        // 文字样式按钮组
+        const styleContainer = document.createElement('div');
+        styleContainer.style.cssText = `
+            display: flex;
+            gap: 5px;
+        `;
+        
+        // 加粗按钮
+        const boldBtn = this.createButton('B', () => {
+            const activeObj = this.canvas.getActiveObject();
+            if (activeObj && activeObj.type === 'i-text') {
+                activeObj.set('fontWeight', activeObj.fontWeight === 'bold' ? 'normal' : 'bold');
+                this.canvas.renderAll();
+                boldBtn.style.background = activeObj.fontWeight === 'bold' ? '#666' : '#444';
+            }
+        });
+        boldBtn.style.fontWeight = 'bold';
+        boldBtn.style.padding = '5px 8px';
+        
+        // 斜体按钮
+        const italicBtn = this.createButton('I', () => {
+            const activeObj = this.canvas.getActiveObject();
+            if (activeObj && activeObj.type === 'i-text') {
+                activeObj.set('fontStyle', activeObj.fontStyle === 'italic' ? 'normal' : 'italic');
+                this.canvas.renderAll();
+                italicBtn.style.background = activeObj.fontStyle === 'italic' ? '#666' : '#444';
+            }
+        });
+        italicBtn.style.fontStyle = 'italic';
+        italicBtn.style.padding = '5px 8px';
+        
+        // 下划线按钮
+        const underlineBtn = this.createButton('U', () => {
+            const activeObj = this.canvas.getActiveObject();
+            if (activeObj && activeObj.type === 'i-text') {
+                activeObj.set('underline', !activeObj.underline);
+                this.canvas.renderAll();
+                underlineBtn.style.background = activeObj.underline ? '#666' : '#444';
+            }
+        });
+        underlineBtn.style.textDecoration = 'underline';
+        underlineBtn.style.padding = '5px 8px';
+        
+        styleContainer.appendChild(boldBtn);
+        styleContainer.appendChild(italicBtn);
+        styleContainer.appendChild(underlineBtn);
+        
+        // 字间距控制
+        const charSpacingLabel = document.createElement('span');
+        charSpacingLabel.textContent = '字间距';
+        charSpacingLabel.style.cssText = `
+            color: #fff;
+            font-size: 12px;
+            margin-right: 4px;
+        `;
+        
+        const charSpacingInput = document.createElement('input');
+        charSpacingInput.type = 'number';
+        charSpacingInput.min = '0';
+        charSpacingInput.max = '1000';
+        charSpacingInput.value = '0';
+        charSpacingInput.style.cssText = `
+            width: 50px;
+            padding: 3px;
+            background: #444;
+            border: 1px solid #666;
+            color: #fff;
+            border-radius: 4px;
+        `;
+        
+        const charSpacingContainer = document.createElement('div');
+        charSpacingContainer.style.cssText = `
+            display: flex;
+            align-items: center;
+        `;
+        charSpacingContainer.appendChild(charSpacingLabel);
+        charSpacingContainer.appendChild(charSpacingInput);
+        
+        charSpacingInput.oninput = () => {
+            const activeObj = this.canvas.getActiveObject();
+            if (activeObj && activeObj.type === 'i-text') {
+                activeObj.set('charSpacing', parseInt(charSpacingInput.value));
+                this.canvas.renderAll();
+            }
+        };
+        
+        // 行间距控制
+        const lineHeightLabel = document.createElement('span');
+        lineHeightLabel.textContent = '行间距';
+        lineHeightLabel.style.cssText = `
+            color: #fff;
+            font-size: 12px;
+            margin-right: 4px;
+        `;
+        
+        const lineHeightInput = document.createElement('input');
+        lineHeightInput.type = 'number';
+        lineHeightInput.min = '0';
+        lineHeightInput.max = '10';
+        lineHeightInput.step = '0.1';
+        lineHeightInput.value = '1';
+        lineHeightInput.style.cssText = `
+            width: 50px;
+            padding: 3px;
+            background: #444;
+            border: 1px solid #666;
+            color: #fff;
+            border-radius: 4px;
+        `;
+        
+        const lineHeightContainer = document.createElement('div');
+        lineHeightContainer.style.cssText = `
+            display: flex;
+            align-items: center;
+        `;
+        lineHeightContainer.appendChild(lineHeightLabel);
+        lineHeightContainer.appendChild(lineHeightInput);
+        
+        lineHeightInput.oninput = () => {
+            const activeObj = this.canvas.getActiveObject();
+            if (activeObj && activeObj.type === 'i-text') {
+                activeObj.set('lineHeight', parseFloat(lineHeightInput.value));
+                this.canvas.renderAll();
+            }
+        };
+        
+        // 描边控制
+        const strokeLabel = document.createElement('span');
+        strokeLabel.textContent = '描边';
+        strokeLabel.style.cssText = `
+            color: #fff;
+            font-size: 12px;
+            margin-right: 4px;
+        `;
+        
+        const strokeColorPicker = document.createElement('input');
+        strokeColorPicker.type = 'color';
+        strokeColorPicker.value = '#000000';
+        strokeColorPicker.style.cssText = `
+            width: 28px;
+            height: 28px;
+            padding: 0;
+            border: 1px solid #666;
+            border-radius: 4px;
+            background: #444;
+            cursor: pointer;
+            margin-right: 4px;
+        `;
+        
+        const strokeWidthInput = document.createElement('input');
+        strokeWidthInput.type = 'number';
+        strokeWidthInput.min = '0';
+        strokeWidthInput.max = '10';
+        strokeWidthInput.step = '0.5';
+        strokeWidthInput.value = '0';
+        strokeWidthInput.style.cssText = `
+            width: 40px;
+            padding: 3px;
+            background: #444;
+            border: 1px solid #666;
+            color: #fff;
+            border-radius: 4px;
+        `;
+        
+        const strokeContainer = document.createElement('div');
+        strokeContainer.style.cssText = `
+            display: flex;
+            align-items: center;
+        `;
+        strokeContainer.appendChild(strokeLabel);
+        strokeContainer.appendChild(strokeColorPicker);
+        strokeContainer.appendChild(strokeWidthInput);
+        
+        strokeColorPicker.oninput = () => {
+            const activeObj = this.canvas.getActiveObject();
+            if (activeObj && activeObj.type === 'i-text') {
+                activeObj.set('stroke', strokeColorPicker.value);
+                this.canvas.renderAll();
+            }
+        };
+        
+        strokeWidthInput.oninput = () => {
+            const activeObj = this.canvas.getActiveObject();
+            if (activeObj && activeObj.type === 'i-text') {
+                activeObj.set('strokeWidth', parseFloat(strokeWidthInput.value));
+                this.canvas.renderAll();
+            }
+        };
+
+
+        
+        // 添加所有控件到面板
+        panel.appendChild(addTextBtn);
+        panel.appendChild(fontSelector);
+        panel.appendChild(sizeSelector);
+        panel.appendChild(colorPicker);
+        panel.appendChild(bgColorContainer);
+        panel.appendChild(styleContainer);
+        panel.appendChild(charSpacingContainer);
+        panel.appendChild(lineHeightContainer);
+        panel.appendChild(strokeContainer);
+
+
+        
+        // 监听文本对象选择事件，更新控件状态
+        this.canvas.on('selection:created', (e) => {
+            const obj = e.selected[0];
+            if (obj && obj.type === 'i-text') {
+                fontSelector.value = obj.fontFamily;
+                sizeSelector.value = obj.fontSize;
+                colorPicker.value = obj.fill;
+                bgColorPicker.value = obj.backgroundColor || '#000000';
+                boldBtn.style.background = obj.fontWeight === 'bold' ? '#666' : '#444';
+                italicBtn.style.background = obj.fontStyle === 'italic' ? '#666' : '#444';
+                underlineBtn.style.background = obj.underline ? '#666' : '#444';
+                charSpacingInput.value = obj.charSpacing || 0;
+                lineHeightInput.value = obj.lineHeight || 1.2;
+                strokeWidthInput.value = obj.strokeWidth || 0;
+                strokeColorPicker.value = obj.stroke || '#000000';
+            }
+        });
+        
+        this.canvas.on('selection:updated', (e) => {
+            const obj = e.selected[0];
+            if (obj && obj.type === 'i-text') {
+                fontSelector.value = obj.fontFamily;
+                sizeSelector.value = obj.fontSize;
+                colorPicker.value = obj.fill;
+                bgColorPicker.value = obj.backgroundColor || '#000000';
+                boldBtn.style.background = obj.fontWeight === 'bold' ? '#666' : '#444';
+                italicBtn.style.background = obj.fontStyle === 'italic' ? '#666' : '#444';
+                underlineBtn.style.background = obj.underline ? '#666' : '#444';
+                charSpacingInput.value = obj.charSpacing || 0;
+                lineHeightInput.value = obj.lineHeight || 1.2;
+                strokeWidthInput.value = obj.strokeWidth || 0;
+                strokeColorPicker.value = obj.stroke || '#000000';
+            }
+        });
+        
+        return panel;
+    }
+    
+    // 切换文字功能面板显示状态
+    toggleTextPanel() {
+        if (!this.textPanel) {
+            this.textPanel = this.createTextPanel();
+            this.node.canvasElement.appendChild(this.textPanel);
+        }
+        
+        this.textPanelVisible = !this.textPanelVisible;
+        this.textPanel.style.display = this.textPanelVisible ? 'flex' : 'none';
+    }
+
     initializeControls() {
         const layerSelector = this.createLayerSelector();
         this.container.appendChild(layerSelector);
@@ -2076,6 +2486,11 @@ class ControlPanel {
             if (this.node.id) {
                 rgthree.queueOutputNodes([this.node.id]);
             }
+        });
+        
+        // 添加文字功能按钮
+        const textButton = this.createButton('文字', () => {
+            this.toggleTextPanel();
         });
 
         const resetButton = this.createButton('重置', () => {
@@ -2166,8 +2581,10 @@ class ControlPanel {
 
         // 添加控件到容器
         this.container.appendChild(loadButton);
+        this.container.appendChild(textButton);  // 添加文字按钮
         this.container.appendChild(resetButton);
         this.container.appendChild(settingsButton);
+        
         // 监听画布选择变化
         this.canvas.on('selection:created', (e) => {
             const obj = e.selected[0];
@@ -2511,7 +2928,7 @@ class FastCanvasOverlay {
             appearance: none;
         `;
 
-        colorInput.onchange = (e) => {
+        colorInput.oninput = (e) => {
             const newColor = e.target.value;
             if (node.canvasInstance?.canvas) {
                 // 创建新的纯色矩形背景
@@ -2667,12 +3084,13 @@ class FastCanvasOverlay {
         // 添加点击事件
         lockButton.onclick = () => {
             const isLocked = lockButton.dataset.locked === 'true';
-            lockButton.dataset.locked = (!isLocked).toString();
-            updateLockStyle(!isLocked);
+            const newLockState = !isLocked;
+            lockButton.dataset.locked = newLockState.toString();
+            updateLockStyle(newLockState);
             
             // 保存锁定状态到节点实例
             if (node.canvasInstance) {
-                node.canvasInstance.isLocked = !isLocked;
+                node.canvasInstance.isLocked = newLockState;
             }
         };
         
@@ -2772,7 +3190,7 @@ app.registerExtension({
                 const result = onNodeCreated?.apply(this, arguments);
                 
                 // 添加随机种子输入框
-                this.addWidget(
+                const seedWidget = this.addWidget(
                     "text",
                     "seed",
                     "initial_seed",  // 给一个初始值
@@ -2809,6 +3227,14 @@ app.registerExtension({
                         }
                         
                         this.setDirtyCanvas(true, false);
+                    }
+                };
+                
+                // 添加队列执行前的钩子到种子widget上
+                seedWidget.beforeQueued = () => {
+                    // 如果画布未锁定，则更新种子
+                    if (!this.canvasInstance?.isLocked) {
+                        this.updateSeed();
                     }
                 };
 
@@ -2961,22 +3387,14 @@ app.registerExtension({
             };
             nodeType.prototype.serialize = function() {
                 const data = LiteGraph.LGraphNode.prototype.serialize.call(this);
-                
-                // 添加画布数据
-                if (this.canvasInstance) {
-                    data.canvasData = this.canvasInstance.serialize();
-                }
+
                 
                 return data;
             };
             
             nodeType.prototype.configure = function(data) {
                 LiteGraph.LGraphNode.prototype.configure.call(this, data);
-                
-                // 恢复画布数据
-                if (data.canvasData && this.canvasInstance) {
-                    this.canvasInstance.deserialize(data.canvasData);
-                }
+
             };
         }
     }
