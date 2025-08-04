@@ -98,10 +98,10 @@ def base64_to_tensor(base64_string):
 
 def toBase64ImgUrl(img):
     bytesIO = BytesIO()
-    img.save(bytesIO, format="jpeg")
+    img.save(bytesIO, format="png")
     img_types = bytesIO.getvalue()
     img_base64 = base64.b64encode(img_types)
-    return f"data:image/jpeg;base64,{img_base64.decode('utf-8')}"
+    return f"data:image/png;base64,{img_base64.decode('utf-8')}"
 
 def tensor_to_base64(tensor):
     if len(tensor.shape) == 3:
@@ -121,9 +121,9 @@ def tensor_to_base64(tensor):
     array = np.ascontiguousarray(array)
     
     try:
-        success, buffer = cv2.imencode('.jpeg', array)
+        success, buffer = cv2.imencode('.png', array)
         if success:
-            return f"data:image/jpeg;base64,{base64.b64encode(buffer).decode('utf-8')}"
+            return f"data:image/png;base64,{base64.b64encode(buffer).decode('utf-8')}"
     except Exception as e:
         print(f"Error encoding image: {e}")
         print(f"Array shape: {array.shape}, dtype: {array.dtype}")

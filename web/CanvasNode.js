@@ -1486,7 +1486,7 @@ class FastCanvas {
                     const tempImg = await createImageBitmap(blob);
 
                     resolve(blob);
-                }, 'image/jpeg', 1.0);
+                }, 'image/png', 1.0);
             });
     
             // 将Blob转换为ArrayBuffer
