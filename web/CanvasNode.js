@@ -11,7 +11,69 @@ const CANVAS_SIZE = {
     CONTROL_PANEL_HEIGHT: 30  // 控制面板高度
 };
 
+// 模块级变量
+const instances = [];
+let eventHandlersInitialized = false;
+let globalUpdateHandler, globalGetStateHandler;
 
+// 模块级函数 - 清理指定节点ID的实例
+function cleanup(nodeId) {
+    const index = instances.findIndex(inst => inst.node?.id === nodeId);
+    if (index !== -1) {
+        const instance = instances[index];
+        
+        // 从数组中移除
+        instances.splice(index, 1);
+        
+        // 清理核心资源
+        if (instance.canvas) {
+            instance.canvas.off();
+            instance.canvas.dispose();
+        }
+        if (instance.canvasContainer?.parentNode) {
+            instance.canvasContainer.parentNode.removeChild(instance.canvasContainer);
+        }
+        return true;
+    }
+    return false;
+}
+
+// 模块级函数 - 设置全局事件处理
+function setupGlobalEventHandling() {
+    // 如果已经设置了全局处理，则不重复设置
+    if (eventHandlersInitialized) return;
+    
+    // 设置全局事件处理函数
+    globalUpdateHandler = async (event) => {
+        const data = event.detail;
+        if (!data || !data.node_id) return;
+        
+        const nodeId = data.node_id;
+        const instance = instances.find(inst => inst.node?.id.toString() === nodeId);
+        
+        if (instance && data.canvas_data) {
+            await instance.updateCanvas(data.canvas_data);
+        }
+    };
+    
+    globalGetStateHandler = async (event) => {
+        const data = event.detail;
+        if (!data || !data.node_id) return;
+        
+        const nodeId = data.node_id;
+        const instance = instances.find(inst => inst.node?.id.toString() === nodeId);
+        
+        if (instance) {
+            await instance.sendCanvasState();
+        }
+    };
+    
+    // 添加全局事件监听器
+    api.addEventListener("fast_canvas_update", globalUpdateHandler);
+    api.addEventListener("fast_canvas_get_state", globalGetStateHandler);
+    
+    eventHandlersInitialized = true;
+}
 class FastCanvas {
     constructor(node, initialSize = null) {
         this.node = node;
@@ -23,7 +85,14 @@ class FastCanvas {
             height: CANVAS_SIZE.HEIGHT
         };
         
-        // 立即应用尺寸到实例属性
+        // 添加到实例数组
+        instances.push(this);
+        console.log(`[实例] 新建，当前共有${instances.length}个`);
+        
+        // 确保全局事件处理已设置
+        setupGlobalEventHandling();
+        
+        // 其他初始化代码...
         this.currentSize = { ...this.originalSize };
         this.maxDisplaySize = 768;
         // 创建缩放值显示元素
@@ -44,6 +113,22 @@ class FastCanvas {
         this.initCanvas();
         this.setupDragAndDrop();
         this.setupPaste();
+    }
+
+    cleanup() {
+        try {
+
+            if (this.node?.id) {
+                cleanup(this.node.id);
+            } else {
+                const index = instances.indexOf(this);
+                if (index !== -1) {
+                    instances.splice(index, 1);
+                }
+            }
+        } catch (e) {
+            console.error('[清理错误]', e);
+        }
     }
 
     initCanvas() {
@@ -126,8 +211,6 @@ class FastCanvas {
         this.initContextMenu();
         // 设置事件监听
         this.setupEventListeners();
-        this.setupWebSocket();
-        
         // 设置节点的初始尺寸
         this.node.size = [
             this.originalSize.width + CANVAS_SIZE.RIGHT_MARGIN,
@@ -892,32 +975,6 @@ class FastCanvas {
     }
 
 
-    setupWebSocket() {
-        // 先移除旧的监听器
-        api.removeEventListener("fast_canvas_update", this._handleCanvasUpdate);
-
-        api.addEventListener("fast_canvas_update", async (event) => {
-            const data = event.detail;
-            if (data && data.node_id && data.node_id === this.node.id.toString()) {
-                if (data.canvas_data) {
-
-                    await this.updateCanvas(data.canvas_data);
-
-                }
-            }
-        });
-        api.addEventListener("fast_canvas_get_state", async (event) => {
-            const data = event.detail;
-
-            
-            if (data && data.node_id && data.node_id === this.node.id.toString()) {
-
-                await this.sendCanvasState();
-
-            }
-        });
-    }
-
     
     setupEventListeners() {
 
@@ -1224,7 +1281,7 @@ class FastCanvas {
         return new Promise((resolve) => {
             const existingObj = this.layers.get(layerData.id);
             if (existingObj) {
-                // 保存当前的变换状态
+                // 保存当前的变换状态（补充透明度与混合模式）
                 const currentState = {
                     scaleX: existingObj.scaleX,
                     scaleY: existingObj.scaleY,
@@ -1232,7 +1289,9 @@ class FastCanvas {
                     top: existingObj.top,
                     angle: existingObj.angle,
                     flipX: existingObj.flipX,
-                    flipY: existingObj.flipY
+                    flipY: existingObj.flipY,
+                    opacity: existingObj.opacity,
+                    globalCompositeOperation: existingObj.globalCompositeOperation
                 };
     
                 // 检查当前对象是否被选中
@@ -1447,10 +1506,11 @@ class FastCanvas {
     }
 
     async sendCanvasState() {
-        if (!this.canvas) {
-
+        if (!this.canvas || !this.canvas.contextContainer) {
+            console.log('[FastCanvas] 画布或上下文不存在，跳过状态发送');
             return;
         }
+    
 
         try {
             const timestamp = Date.now();
@@ -1585,96 +1645,134 @@ class FastCanvas {
         }
     }
 
-    reset() {
-        // 保存当前的尺寸设置
-        const currentOriginalSize = { ...this.originalSize };
-        const currentMaxDisplaySize = this.maxDisplaySize;
-    
-        // 清理现有画布
-        if (this.canvas) {
-            this.canvas.clear();
-            this.canvas.dispose();
+    // 使用fabric.js内置方法序列化画布（不包含图像数据）
+    serializeCanvasJSON() {
+        if (!this.canvas) {
+            return null;
         }
-    
-        // 清理容器
-        if (this.canvasContainer) {
-            while (this.canvasContainer.firstChild) {
-                this.canvasContainer.removeChild(this.canvasContainer.firstChild);
+        
+        try {
+            // 保存当前选中状态
+            const activeObjectIds = [];
+            const activeObjects = this.canvas.getActiveObjects();
+            if (activeObjects) {
+                activeObjects.forEach(obj => {
+                    if (obj.id) activeObjectIds.push(obj.id);
+                });
             }
-        }
-        
-        // 保持原始尺寸不变
-        this.originalSize = currentOriginalSize;
-        
-        // 使用当前尺寸重新计算显示尺寸
-        const scaledSize = this.calculateScaledSize(
-            currentOriginalSize.width,
-            currentOriginalSize.height,
-            currentMaxDisplaySize
-        );
-        const STORAGE_KEY = 'canvas_size_';
-        localStorage.setItem(STORAGE_KEY + this.node.id, JSON.stringify(this.originalSize));
-    
-        // 重新初始化画布
-        this.initCanvas();
-    
-        // 清理节点的 DOM 元素
-        if (this.node.canvasElement) {
-            while (this.node.canvasElement.firstChild) {
-                this.node.canvasElement.removeChild(this.node.canvasElement.firstChild);
+            
+            // 序列化画布，包含自定义属性（混合模式/透明度/文字相关）
+            const json = this.canvas.toJSON([
+                'id', 'originalWidth', 'originalHeight',
+                'globalCompositeOperation', 'opacity',
+                'text', 'fontFamily', 'fontSize', 'fill', 'backgroundColor',
+                'fontWeight', 'fontStyle', 'underline',
+                'charSpacing', 'lineHeight', 'stroke', 'strokeWidth', 'textAlign'
+            ]);
+            
+            // 添加元数据
+            json.metadata = {
+                version: '1.0',
+                timestamp: Date.now(),
+                canvasSize: this.originalSize,
+                activeObjectIds: activeObjectIds
+            };
+            
+            // 移除图像数据，仅保留引用
+            if (json.objects) {
+                json.objects.forEach(obj => {
+                    if (obj.type === 'image') {
+                        obj.imageRef = `layer_${obj.id}`;
+                        delete obj.src;
+                    }
+                });
             }
-            // 使用计算后的尺寸设置节点的 DOM 元素样式
-            this.node.canvasElement.style.width = `${scaledSize.width}px`;
-            this.node.canvasElement.style.height = `${scaledSize.height + CANVAS_SIZE.CONTROL_PANEL_HEIGHT}px`;
-            this.node.canvasElement.appendChild(this.canvasContainer);
+            
+            if (json.backgroundImage) {
+                json.backgroundImage.imageRef = 'background';
+                delete json.backgroundImage.src;
+            }
+            
+            return JSON.stringify(json);
+        } catch (error) {
+            return null;
         }
-    
-        // 使用计算后的尺寸设置节点尺寸
-        this.node.size = [
-            scaledSize.width + CANVAS_SIZE.RIGHT_MARGIN, 
-            scaledSize.height + CANVAS_SIZE.BOTTOM_MARGIN + CANVAS_SIZE.CONTROL_PANEL_HEIGHT
-        ];
-        
-    
-        // 重置其他状态
-        this.layers.clear();
-        this.background = null;
-        this.isUpdating = false;
-        this.isDragging = false;
-        this.pendingUpdate = false;
-        this.lastCanvasState = null;
-    
-        // 强制更新节点
-        this.node.setDirtyCanvas(true, true);
     }
-    // 添加清理方法
-    cleanup() {
-
-        // 移除 WebSocket 监听器
-        api.removeEventListener("fast_canvas_update", this._handleCanvasUpdate);
-        // 移除事件监听器
-        if (this.canvas) {
-            this.canvas.off(); // 移除所有 fabric.js 事件监听器
-            this.canvas.dispose(); // 销毁 fabric.js 实例
+    // 从JSON恢复画布状态（需要提供图像数据）
+    async deserializeCanvasJSON(jsonString, imageDataProvider) {
+        if (!this.canvas || !jsonString) {
+            return false;
         }
-
-        // 清理 DOM 元素
-        if (this.canvasContainer && this.canvasContainer.parentNode) {
-            this.canvasContainer.parentNode.removeChild(this.canvasContainer);
-        }
-        if (this._pasteHandler) {
-            this.canvasContainer.removeEventListener('paste', this._pasteHandler);
-        }
-        // 清理状态
-        this.layers.clear();
-        this.background = null;
-        this.lastCanvasState = null;
         
-        // 移除引用
-        this.canvas = null;
-        this.canvasContainer = null;
-    }
+        try {
+            // 解析JSON
+            const json = JSON.parse(jsonString);
+            
+            // 处理对象中的图像引用
+            if (json.objects) {
+                for (let i = 0; i < json.objects.length; i++) {
+                    const obj = json.objects[i];
+                    if (obj.type === 'image' && obj.imageRef && imageDataProvider) {
+                        // 获取图像数据
+                        const imageData = await imageDataProvider(obj.imageRef);
+                        if (imageData) {
+                            obj.src = imageData;
+                        }
+                    }
+                }
+            }
+            
+            // 处理背景图像引用
+            if (json.backgroundImage && json.backgroundImage.imageRef && imageDataProvider) {
+                const bgImageData = await imageDataProvider(json.backgroundImage.imageRef);
+                if (bgImageData) {
+                    json.backgroundImage.src = bgImageData;
+                }
+            }
+            
+            // 使用fabric.js的loadFromJSON方法恢复画布
+            return new Promise(resolve => {
+                this.canvas.loadFromJSON(json, () => {
+                    // 恢复选中状态
+                    if (json.metadata && json.metadata.activeObjectIds && json.metadata.activeObjectIds.length > 0) {
+                        const objectsToSelect = [];
+                        json.metadata.activeObjectIds.forEach(id => {
+                            const obj = this.canvas.getObjects().find(o => o.id === id);
+                            if (obj) objectsToSelect.push(obj);
+                        });
+                        
+                        if (objectsToSelect.length === 1) {
+                            this.canvas.setActiveObject(objectsToSelect[0]);
+                        } else if (objectsToSelect.length > 1) {
+                            const selection = new fabric.ActiveSelection(objectsToSelect, {
+                                canvas: this.canvas
+                            });
+                            this.canvas.setActiveObject(selection);
+                        }
+                    }
+                    
+                    // 设置画布尺寸
+                    if (json.metadata && json.metadata.canvasSize) {
+                        this.originalSize = json.metadata.canvasSize;
+                    }
+                    
+                    // 更新图层引用
+                    this.layers = new Map();
+                    this.canvas.getObjects().forEach(obj => {
+                        if (obj.id) {
+                            this.layers.set(obj.id, obj);
+                        }
+                    });
+                    
+                    this.canvas.renderAll();
 
+                    resolve(true);
+                });
+            });
+        } catch (error) {
+            return false;
+        }
+    }
 }
 
 
@@ -3243,8 +3341,7 @@ app.registerExtension({
 
             nodeType.prototype.onAdded = function() {
                 if (this.id !== undefined && this.id !== -1) {
-                    // ... 其他初始化代码 ...
-            
+
                     // 从本地存储获取保存的尺寸
                     const STORAGE_KEY = 'canvas_size_';
                     const savedSize = localStorage.getItem(STORAGE_KEY + this.id);
@@ -3252,7 +3349,7 @@ app.registerExtension({
                         width: CANVAS_SIZE.WIDTH,
                         height: CANVAS_SIZE.HEIGHT
                     };
-            
+                    
                     // 创建画布容器
                     const element = document.createElement("div");
                     element.style.position = "relative";
@@ -3310,92 +3407,77 @@ app.registerExtension({
             };
 
 
-            
-            nodeType.prototype.onConfigure = function() {
-               
-                // 防止重复配置
-                if (this._configuring) {
-                    return;
-                }
-            
-                // 检查是否是页面加载时的自动重置
-                if (document.readyState !== "complete") {
-                    return;
-                }
-            
-                // 检查是否需要重置
-                if (!this.properties?.needsReset) {
-                    return;
-                }
-                
-                try {
-                    this._configuring = true;
-
-                    let new_node = LiteGraph.createNode(nodeType.comfyClass);
-                    if (!new_node) {
-                        return;
-                    }
-                    
-                    // 设置新节点位置
-                    new_node.pos = [this.pos[0], this.pos[1]];
-                    
-                    // 添加到图表中，保持原有的 false 参数
-                    app.graph.add(new_node, false);
-                    
-                    // 复制节点信息，保持原有的调用方式
-                    node_info_copy(this, new_node, true);
-                    
-                    // 移除旧节点，使用 requestAnimationFrame 确保正确的执行顺序
-                    requestAnimationFrame(() => {
-                        app.graph.remove(this);
-                        app.graph.setDirtyCanvas(true, true);
-                    });
-                    
-                } catch (error) {
-                } finally {
-                    this._configuring = false;
-                    // 重置完成后清除标记
-                    if (this.properties) {
-                        this.properties.needsReset = false;
-                    }
-                }
-            };
-            
-            // 添加标记重置的方法
-            nodeType.prototype.markForReset = function() {
-                if (!this.properties) {
-                    this.properties = {};
-                }
-                this.properties.needsReset = true;
-            };
-            // 节点移除
             nodeType.prototype.onRemoved = function() {
-                // 首先检查 this 是否有效
                 if (!this) return;
                 
-                // 然后检查 canvasInstance 是否存在
+                const nodeId = this.id;
+                
+                // 清理实例
+                cleanup(nodeId);
+                
+                // 清除引用
                 if (this.canvasInstance) {
-                    // 清理状态
-                    if (this.widgets) {
-                        const stateWidget = this.widgets.find(w => w.name === "state");
-                        if (stateWidget) {
-                            stateWidget.value = "0";
+                    this.canvasInstance = null;
+                }
+                
+                console.log(`节点${nodeId}已移除，剩余实例数：${instances.length}`);
+            };
+            // 在FastCanvas节点定义中添加
+            nodeType.prototype.onConfigure = function(o) {
+                // 不要调用原始的onConfigure方法，因为会导致递归
+                
+                // 发送need_update=true标记到后端
+                setTimeout(() => {
+                    api.fetchApi('/fast_canvas_refresh_signal', {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            node_id: this.id.toString(),
+                            need_update: true
+                        })
+                    }).then(() => {
+                        console.log(`[FastCanvas] 已发送刷新信号给节点 ${this.id}`);
+                    }).catch(error => {
+                        console.error(`[FastCanvas] 发送刷新信号失败:`, error);
+                    });
+                }, 0);
+                
+                // 如果有保存的画布状态，尝试恢复
+                if (o && o.properties && o.properties.canvasState && this.canvasInstance) {
+                    // 尝试恢复画布状态
+                    setTimeout(async () => {
+                        try {
+                            // 直接使用null作为imageDataProvider，因为图像数据会通过后端获取
+                            const success = await this.canvasInstance.deserializeCanvasJSON(
+                                o.properties.canvasState,
+                                null
+                            );
+                            
+                            if (success) {
+                                console.log(`[FastCanvas] 节点 ${this.id} 画布状态已恢复`);
+                            } else {
+                                console.error(`[FastCanvas] 节点 ${this.id} 画布状态恢复失败`);
+                            }
+                        } catch (error) {
+                            console.error(`[FastCanvas] 恢复画布状态时出错:`, error);
                         }
-                    }
-                    this.canvasInstance.cleanup();
+                    }, 500); // 延迟执行，确保画布已经初始化
                 }
             };
-            nodeType.prototype.serialize = function() {
-                const data = LiteGraph.LGraphNode.prototype.serialize.call(this);
 
-                
-                return data;
+            // 在FastCanvas节点定义中添加
+            nodeType.prototype.onSerialize = function(o) {
+                // 确保节点有canvas实例
+                if (this.canvasInstance && this.canvasInstance.canvas) {
+                    // 序列化画布状态
+                    const canvasState = this.canvasInstance.serializeCanvasJSON();
+                    if (canvasState) {
+                        // 将序列化数据保存到节点的properties中
+                        if (!o.properties) o.properties = {};
+                        o.properties.canvasState = canvasState;
+                    }
+                }
             };
-            
-            nodeType.prototype.configure = function(data) {
-                LiteGraph.LGraphNode.prototype.configure.call(this, data);
 
-            };
         }
     }
 });
@@ -3476,4 +3558,3 @@ app.registerExtension({
         }
     }
 });
-

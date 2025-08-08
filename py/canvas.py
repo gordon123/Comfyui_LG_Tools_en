@@ -7,11 +7,11 @@ def get_canvas_storage():
         PromptServer.instance._fast_canvas_node_data = {}
     return PromptServer.instance._fast_canvas_node_data
 
-def get_canvas_cache():
-    """获取FastCanvas节点的缓存存储"""
-    if not hasattr(PromptServer.instance, '_fast_canvas_node_cache'):
-        PromptServer.instance._fast_canvas_node_cache = {}
-    return PromptServer.instance._fast_canvas_node_cache
+def get_refresh_signals():
+    """获取FastCanvas节点的刷新信号缓存"""
+    if not hasattr(PromptServer.instance, '_fast_canvas_refresh_signals'):
+        PromptServer.instance._fast_canvas_refresh_signals = {}
+    return PromptServer.instance._fast_canvas_refresh_signals
 
 class FastCanvasTool:
     @classmethod
@@ -134,47 +134,53 @@ def tensor_to_base64(tensor):
 
 @routes.post("/fast_canvas_all")
 async def handle_canvas_data(request):
-    try:
-        data = await request.json()
-        node_id = data.get('node_id')
-        if not node_id:
-            print("[FastCanvas] Missing node_id")
-            return web.json_response({"status": "error", "message": "Missing node_id"}, status=400)
 
-        canvas_storage = get_canvas_storage()
+    data = await request.json()
+    node_id = data.get('node_id')
+    canvas_storage = get_canvas_storage()
+    
+    if node_id not in canvas_storage:
+        print(f"[FastCanvas] 没有找到等待响应的节点")
+        return web.Response(status=200)
         
-        if node_id not in canvas_storage:
-            print(f"[FastCanvas] 没有找到等待响应的节点")
-            return web.Response(status=200)
-            
-        print(f"[FastCanvas] 成功等待节点，准备处理数据")
-        transform_data = data.get('layer_transforms', {})
-        main_image = array_to_tensor(data.get('main_image'), "image")
-        main_mask = array_to_tensor(data.get('main_mask'), "mask")
+    print(f"[FastCanvas] 成功等待节点，准备处理数据")
+    transform_data = data.get('layer_transforms', {})
+    main_image = array_to_tensor(data.get('main_image'), "image")
+    main_mask = array_to_tensor(data.get('main_mask'), "mask")
 
-        processed_data = {
-            'image': main_image,
-            'mask': main_mask,
-            'transform_data': transform_data
-        }
+    processed_data = {
+        'image': main_image,
+        'mask': main_mask,
+        'transform_data': transform_data
+    }
 
-        node_info = canvas_storage[node_id]
-        node_info["processed_data"] = processed_data
-        node_info["event"].set()
+    node_info = canvas_storage[node_id]
+    node_info["processed_data"] = processed_data
+    node_info["event"].set()
 
-        return web.json_response({"status": "success"})
+    return web.json_response({"status": "success"})
 
-    except Exception as e:
-        print(f"[FastCanvas] 处理失败: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        return web.json_response({"status": "error", "message": str(e)}, status=500)
+    
+
+@routes.post("/fast_canvas_refresh_signal")
+async def handle_refresh_signal(request):
+
+    data = await request.json()
+    node_id = data.get('node_id')
+    refresh_signals = get_refresh_signals()
+    refresh_signals[node_id] = True
+    print(f"[FastCanvas] 节点{node_id}设置need_update=True")
+    
+    return web.json_response({"status": "success"})
+
 
 class FastCanvas:
 
     
     def __init__(self):
         self.node_id = None
+        self.last_fc_data = None
+        self.need_update = False  # 添加need_update变量
 
     @classmethod
     def clean_nodes(cls):
@@ -206,18 +212,22 @@ class FastCanvas:
     def canvas_execute(self, unique_id, fc_data=None):
         try:
             self.node_id = unique_id
-
+            
+            # 检查刷新信号
+            refresh_signals = get_refresh_signals()
+            need_update = refresh_signals.pop(unique_id, False)
+            
             canvas_storage = get_canvas_storage()
             event = Event()
-
+            
             canvas_storage[unique_id] = {
                 "event": event,
                 "processed_data": None,
                 "waiting_for_response": True
             }
-
-
-            if fc_data is not None and (not hasattr(self, 'last_fc_data') or self.last_fc_data != fc_data):
+            
+            # 根据刷新信号或fc_data决定发送哪种事件
+            if need_update or (fc_data is not None and (not hasattr(self, 'last_fc_data') or self.last_fc_data != fc_data)):
                 PromptServer.instance.send_sync(
                     "fast_canvas_update", {
                         "node_id": unique_id,

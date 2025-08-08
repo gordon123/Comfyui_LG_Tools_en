@@ -469,6 +469,7 @@ app.registerExtension({
 
                 this.isWaitingSelection = false;
                 this.update();
+                this.setExecutingState(false);
             };
             
             nodeType.prototype.cancelSelection = function(source = "manual") {
@@ -497,6 +498,7 @@ app.registerExtension({
                 }).finally(() => {
                     this.isCancelling = false;
                     this.update();
+                    this.setExecutingState(false);
                 });
             };
             
@@ -538,6 +540,83 @@ app.registerExtension({
                     this.cancelButton.disabled = true;
                 }
             };
+            nodeType.prototype.setExecutingState = function(isExecuting) {
+                this.isExecuting = isExecuting;
+                this.strokeStyles = this.strokeStyles || {};
+                this.strokeStyles['customExecuting'] = function() {
+                    if (this.isExecuting) {
+                        return { color: '#0f0' }; 
+                    }
+                    return null;
+                };
+
+                if (app.graph) {
+                    app.graph.setDirtyCanvas(true, false);
+                }
+            };
+
+            nodeType.prototype.serialize = function() {
+                const data = LiteGraph.LGraphNode.prototype.serialize.call(this);
+                
+                data.isWaitingSelection = this.isWaitingSelection;
+                data.currentMode = this.currentMode;
+                
+                if (this.imageData && this.imageData.length > 0) {
+                    data.imageData = this.imageData;
+                }
+                
+                if (this.selected_images && this.selected_images.size > 0) {
+                    data.selected_images = Array.from(this.selected_images);
+                }
+                
+                data.isExecuting = this.isExecuting || false;
+                
+                return data;
+            };
+
+            nodeType.prototype.configure = function(data) {
+                LiteGraph.LGraphNode.prototype.configure.call(this, data);
+                
+                this.isWaitingSelection = data.isWaitingSelection || false;
+                this.currentMode = data.currentMode || "always_pause";
+                
+                if (data.imageData && data.imageData.length > 0) {
+                    this.imageData = data.imageData;
+                    
+                    this.imgs = [];
+                    let loadedCount = 0;
+                    
+                    this.imageData.forEach((imgData, i) => {
+                        const img = new Image();
+                        img.onload = () => {
+                            loadedCount++;
+                            
+                            if (loadedCount === this.imageData.length) {
+                                this.calculateImageLayout();
+                                app.graph.setDirtyCanvas(true);
+                            }
+                        };
+                        
+                        img.src = api.apiURL(`/view?filename=${encodeURIComponent(imgData.filename)}&type=${imgData.type}&subfolder=${imgData.subfolder}`);
+                        this.imgs.push(img);
+                    });
+                }
+                
+                this.ensurePropertiesValid();
+                if (data.selected_images && Array.isArray(data.selected_images)) {
+                    this.selected_images.clear();
+                    data.selected_images.forEach(index => {
+                        this.selected_images.add(index);
+                    });
+                }
+                
+                if (data.isExecuting) {
+                    setTimeout(() => this.setExecutingState(true), 100);
+                }
+                
+                this.updateWidgets();
+            };
+
         }
     },
     
@@ -560,13 +639,10 @@ app.registerExtension({
             const data = event.detail;
             
             const node = app.graph._nodes_by_id[data.id];
-            if (!node) {
+            if (!node || !node.isChooser) {
                 return;
             }
-            
-            if (!node.isChooser) {
-                return;
-            }
+            node.setExecutingState(false);
             
             const imageData = data.urls.map((url, index) => ({
                 index: index,
@@ -607,14 +683,11 @@ app.registerExtension({
                 img.src = api.apiURL(`/view?filename=${encodeURIComponent(imgData.filename)}&type=${imgData.type}&subfolder=${imgData.subfolder}&rand=${Math.random()}`);
                 node.imgs.push(img);
             });
-            
-            if (!node.setSizeForImage) {
-                node.setSizeForImage = function() {
-                };
-            }
-            
-            node.setSizeForImage();
+
             node.update();
+            if (currentMode === "always_pause") {
+                node.setExecutingState(true);
+            }
         });
         
         api.addEventListener("image_selector_selection", (event) => {
