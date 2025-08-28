@@ -76,7 +76,7 @@ export class TerminalManager {
     }
     
     // 创建节点时的设置
-    setupNode(node) {
+    async setupNode(node) {
         var textArea = Util.AddReadOnlyTextArea(node, "terminal", "");
         setTimeout(() => {
             if (textArea.element) {
@@ -85,15 +85,47 @@ export class TerminalManager {
                 textArea.element.style.fontFamily = "monospace";
             }
         }, 0);
-        
-        let clearBtn = Util.AddButtonWidget(node, "清空日志", () => {
-            this.clearTerminal();
-        });
-        clearBtn.width = 128;
-        
+
+        // 动态导入避免重复声明问题
+        try {
+            const { MultiButtonWidget } = await import("./multi_button_widget.js");
+            const { queueSelectedOutputNodes } = await import("./queue_shortcut.js");
+
+            // 添加多按钮组件：清理日志 + 执行
+            const buttons = [
+                {
+                    text: "清理日志",
+                    callback: () => {
+                        this.clearTerminal();
+                    }
+                },
+                {
+                    text: "执行",
+                    callback: () => {
+                        queueSelectedOutputNodes();
+                    }
+                }
+            ];
+
+            const multiButtonWidget = MultiButtonWidget(app, "", {
+                labelWidth: 0,
+                buttonSpacing: 4
+            }, buttons);
+
+            node.addCustomWidget(multiButtonWidget);
+        } catch (error) {
+            console.error("Failed to load button components:", error);
+            // 如果动态导入失败，回退到原来的单按钮
+            let clearBtn = Util.AddButtonWidget(node, "清空日志", () => {
+                this.clearTerminal();
+            });
+            clearBtn.width = 128;
+        }
+
         node.terminalVersion = -1;
         return node;
     }
+
     
     // 绘制时的更新
     updateNode(node, onDrawForeground, ctx, graphcanvas) {

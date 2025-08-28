@@ -1,5 +1,6 @@
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
+import { MultiButtonWidget } from "./multi_button_widget.js";
 
 // 获取input目录的文件列表
 async function getInputFileList() {
@@ -44,16 +45,20 @@ async function deleteImageFile(filename) {
     }
 }
 
-// 加载最新图片并复制到input文件夹
+// 加载最新图片 - 参考PB.js的实现方式
 async function loadLatestImage(node, folder_type) {
     try {
         // 获取指定目录中的最新图片
-        const res = await api.fetchApi(`/lg/get/latest_image?type=${folder_type}`);
+        const res = await api.fetchApi(`/lg/get/latest_image?type=${folder_type}`, { cache: "no-store" });
         
         if (res.status === 200) {
             const item = await res.json();
             
             if (item && item.filename) {
+                // 找到图像小部件
+                const imageWidget = node.widgets.find(w => w.name === 'image');
+                if (!imageWidget) return false;
+                
                 // 使用后端API直接复制到input文件夹
                 const copyRes = await api.fetchApi(`/lg/copy_to_input`, {
                     method: 'POST',
@@ -68,27 +73,23 @@ async function loadLatestImage(node, folder_type) {
                     const copyData = await copyRes.json();
                     
                     if (copyData.success) {
-                        // 找到图像小部件并更新值
-                        const imageWidget = node.widgets.find(w => w.name === 'image');
-                        
-                        if (imageWidget) {
-                            // 获取并更新文件列表
-                            const fileList = await getInputFileList();
-                            if (fileList.length > 0) {
-                                imageWidget.options.values = fileList;
-                            }
-                            
-                            // 更新图像小部件值
-                            imageWidget.value = copyData.filename;
-                            
-                            // 通过回调更新预览图像
-                            if (typeof imageWidget.callback === "function") {
-                                imageWidget.callback(copyData.filename);
-                            }
-                            
-                            // 更新画布
-                            app.graph.setDirtyCanvas(true);
+                        // 获取并更新文件列表
+                        const fileList = await getInputFileList();
+                        if (fileList.length > 0) {
+                            imageWidget.options.values = fileList;
                         }
+                        
+                        // 更新图像小部件值
+                        imageWidget.value = copyData.filename;
+                        
+                        // 通过回调更新预览图像
+                        if (typeof imageWidget.callback === "function") {
+                            imageWidget.callback(copyData.filename);
+                        }
+                        
+                        // 更新画布
+                        app.graph.setDirtyCanvas(true);
+                        return true;
                     }
                 }
             }
@@ -96,6 +97,7 @@ async function loadLatestImage(node, folder_type) {
     } catch (error) {
         console.error(`加载图像失败: ${error}`);
     }
+    return false;
 }
 
 // 扩展ContextMenu以支持图片缩略图和删除功能
@@ -395,15 +397,33 @@ app.registerExtension({
         nodeType.prototype.onNodeCreated = function() {
             const result = onNodeCreated ? onNodeCreated.apply(this, arguments) : undefined;
             
-            const refreshTempButton = this.addWidget("button", "🔄 refresh from Temp", null, () => {
-                loadLatestImage(this, "temp");
-            });
-            refreshTempButton.serialize = false;
-            
-            const refreshOutputButton = this.addWidget("button", "🔄 refresh from Output", null, () => {
-                loadLatestImage(this, "output");
-            });
-            refreshOutputButton.serialize = false;
+            // 使用多按钮组件创建刷新按钮
+            const refreshWidget = this.addCustomWidget(MultiButtonWidget(app, "Refresh From", {
+                labelWidth: 80,
+                buttonSpacing: 4
+            }, [
+                {
+                    text: "Temp",
+                    callback: () => {
+                        loadLatestImage(this, "temp").then(success => {
+                            if (success) {
+                                app.graph.setDirtyCanvas(true);
+                            }
+                        });
+                    }
+                },
+                {
+                    text: "Output",
+                    callback: () => {
+                        loadLatestImage(this, "output").then(success => {
+                            if (success) {
+                                app.graph.setDirtyCanvas(true);
+                            }
+                        });
+                    }
+                }
+            ]));
+            refreshWidget.serialize = false;
             
             return result;
         };

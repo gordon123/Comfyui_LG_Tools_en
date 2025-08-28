@@ -66,6 +66,8 @@ preview_bridge_image_id_map = {}
 preview_bridge_image_name_map = {}
 preview_bridge_cache = {}
 preview_bridge_last_mask_cache = {}
+# 存储每个节点的图片hash，用于检测图片内容变化
+preview_bridge_image_hashes = {}
 
 def set_previewbridge_image(node_id, file, item):
     global pb_id_cnt
@@ -90,7 +92,6 @@ class CachePreviewBridge:
     def INPUT_TYPES(s):
         return {"required": {
                     "image": ("STRING", {"default": ""}),
-                    "use_cache": ("BOOLEAN", {"default": True, "label_on": "Cache", "label_off": "Input"}),
                     },
                 "optional": {
                     "images": ("IMAGE",),
@@ -108,6 +109,18 @@ class CachePreviewBridge:
         self.output_dir = folder_paths.get_temp_directory()
         self.type = "temp"
         self.prev_hash = None
+
+    @staticmethod
+    def calculate_image_hash(images):
+        """计算图片的哈希值用于检测是否改变"""
+        try:
+            if images is None:
+                return None
+            np_images = images.cpu().numpy()
+            image_bytes = np_images.tobytes()
+            return hashlib.md5(image_bytes).hexdigest()
+        except:
+            return None
     @staticmethod
     def load_image(pb_id):
         clipspace_dir = os.path.join(folder_paths.get_input_directory(), "clipspace")
@@ -186,7 +199,35 @@ class CachePreviewBridge:
         final_mask = mask.unsqueeze(0) if len(mask.shape) == 2 else mask
         return image, final_mask, ui_item
 
-    def doit(self, image, use_cache, unique_id, images=None, extra_pnginfo=None):
+    def doit(self, image, unique_id, images=None, extra_pnginfo=None):
+        # 智能决定使用模式：基于图片内容hash检测
+        current_hash = self.calculate_image_hash(images) if images is not None else None
+        last_hash = preview_bridge_image_hashes.get(unique_id)
+
+        # 检测图片是否发生改变
+        has_changed = current_hash != last_hash
+        has_valid_images = images is not None
+
+        # 决定使用模式：
+        # - 如果没有输入图片，使用 cache 模式
+        # - 如果有输入图片且内容发生改变，使用 input 模式
+        # - 如果有输入图片但内容没有改变，使用 cache 模式
+        if not has_valid_images:
+            use_cache = True
+            mode_reason = "No images input"
+        elif has_changed:
+            use_cache = False
+            mode_reason = f"Images changed (hash: {last_hash} -> {current_hash})"
+        else:
+            use_cache = True
+            mode_reason = f"Images unchanged (hash: {current_hash})"
+
+        print(f"[CachePreviewBridge] Node {unique_id}: {mode_reason}, using {'cache' if use_cache else 'input'} mode")
+
+        # 更新存储的hash值
+        if current_hash is not None:
+            preview_bridge_image_hashes[unique_id] = current_hash
+
         # 检查是否有新的剪贴板图片需要更新缓存
         if images is None and image and image not in preview_bridge_image_id_map:
             print("Component value changed, updating cache")

@@ -51,8 +51,12 @@ function setupGlobalEventHandling() {
         const nodeId = data.node_id;
         const instance = instances.find(inst => inst.node?.id.toString() === nodeId);
         
-        if (instance && data.canvas_data) {
+        if (!instance) return;
+
+        if (data.canvas_data) {
             await instance.updateCanvas(data.canvas_data);
+        } else {
+            await instance.sendCanvasState();
         }
     };
     
@@ -87,7 +91,6 @@ class FastCanvas {
         
         // 添加到实例数组
         instances.push(this);
-        console.log(`[实例] 新建，当前共有${instances.length}个`);
         
         // 确保全局事件处理已设置
         setupGlobalEventHandling();
@@ -3419,8 +3422,7 @@ app.registerExtension({
                 if (this.canvasInstance) {
                     this.canvasInstance = null;
                 }
-                
-                console.log(`节点${nodeId}已移除，剩余实例数：${instances.length}`);
+
             };
             // 在FastCanvas节点定义中添加
             nodeType.prototype.onConfigure = function(o) {
@@ -3441,42 +3443,9 @@ app.registerExtension({
                     });
                 }, 0);
                 
-                // 如果有保存的画布状态，尝试恢复
-                if (o && o.properties && o.properties.canvasState && this.canvasInstance) {
-                    // 尝试恢复画布状态
-                    setTimeout(async () => {
-                        try {
-                            // 直接使用null作为imageDataProvider，因为图像数据会通过后端获取
-                            const success = await this.canvasInstance.deserializeCanvasJSON(
-                                o.properties.canvasState,
-                                null
-                            );
-                            
-                            if (success) {
-                                console.log(`[FastCanvas] 节点 ${this.id} 画布状态已恢复`);
-                            } else {
-                                console.error(`[FastCanvas] 节点 ${this.id} 画布状态恢复失败`);
-                            }
-                        } catch (error) {
-                            console.error(`[FastCanvas] 恢复画布状态时出错:`, error);
-                        }
-                    }, 500); // 延迟执行，确保画布已经初始化
-                }
+
             };
 
-            // 在FastCanvas节点定义中添加
-            nodeType.prototype.onSerialize = function(o) {
-                // 确保节点有canvas实例
-                if (this.canvasInstance && this.canvasInstance.canvas) {
-                    // 序列化画布状态
-                    const canvasState = this.canvasInstance.serializeCanvasJSON();
-                    if (canvasState) {
-                        // 将序列化数据保存到节点的properties中
-                        if (!o.properties) o.properties = {};
-                        o.properties.canvasState = canvasState;
-                    }
-                }
-            };
 
         }
     }

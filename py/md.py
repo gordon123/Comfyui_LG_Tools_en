@@ -9,6 +9,7 @@ import base64
 import io
 import traceback
 import subprocess
+import hashlib
 try:
     import torchvision.transforms.v2 as T
 except ImportError:

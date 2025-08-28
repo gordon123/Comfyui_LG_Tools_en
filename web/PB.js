@@ -1,5 +1,6 @@
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
+import { MultiButtonWidget } from "./multi_button_widget.js";
 
 function getFileItem(baseType, path) {
 	try {
@@ -106,25 +107,33 @@ app.registerExtension({
         node._imgs = [new Image()];
         node.imageIndex = 0;
         
-        // 添加从temp文件夹刷新按钮
-        const refreshTempButton = node.addWidget("button", "🔄 refresh from Temp", null, () => {
-            loadLatestImage(node, "temp").then(success => {
-                if (success) {
-                    app.graph.setDirtyCanvas(true);
+        // 使用多按钮组件创建刷新按钮
+        const refreshWidget = node.addCustomWidget(MultiButtonWidget(app, "Refresh From", {
+            labelWidth: 80,
+            buttonSpacing: 4
+        }, [
+            {
+                text: "Temp",
+                callback: () => {
+                    loadLatestImage(node, "temp").then(success => {
+                        if (success) {
+                            app.graph.setDirtyCanvas(true);
+                        }
+                    });
                 }
-            });
-        });
-        refreshTempButton.serialize = false;
-        
-        // 添加从output文件夹刷新按钮
-        const refreshOutputButton = node.addWidget("button", "🔄 refresh from Output", null, () => {
-            loadLatestImage(node, "output").then(success => {
-                if (success) {
-                    app.graph.setDirtyCanvas(true);
+            },
+            {
+                text: "Output",
+                callback: () => {
+                    loadLatestImage(node, "output").then(success => {
+                        if (success) {
+                            app.graph.setDirtyCanvas(true);
+                        }
+                    });
                 }
-            });
-        });
-        refreshOutputButton.serialize = false;
+            }
+        ]));
+        refreshWidget.serialize = false;
         
         // 添加粘贴功能
         node.pasteFile = async function(file) {
