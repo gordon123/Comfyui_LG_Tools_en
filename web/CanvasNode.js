@@ -1,6 +1,7 @@
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 import { fabric } from "./lib/fabric-slim.min.js";  // 使用精简版fabric.js以提高性能
+import { queueManager } from "./queue_shortcut.js";
 
 // 定义常量
 const CANVAS_SIZE = {
@@ -2585,7 +2586,7 @@ class ControlPanel {
 
         const loadButton = this.createButton('加载', () => {
             if (this.node.id) {
-                rgthree.queueOutputNodes([this.node.id]);
+                queueManager.queueOutputNodes([this.node.id]);
             }
         });
         
