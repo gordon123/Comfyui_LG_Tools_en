@@ -2,13 +2,13 @@ from .md import *
 CATEGORY_TYPE = "🎈LAOGOU/Canvas"
 
 def get_canvas_storage():
-    """获取FastCanvas节点的数据存储"""
+    """GetData storage for FastCanvas node"""
     if not hasattr(PromptServer.instance, '_fast_canvas_node_data'):
         PromptServer.instance._fast_canvas_node_data = {}
     return PromptServer.instance._fast_canvas_node_data
 
 def get_refresh_signals():
-    """获取FastCanvas节点的刷新信号缓存"""
+    """GetRefresh signal cache for FastCanvas node"""
     if not hasattr(PromptServer.instance, '_fast_canvas_refresh_signals'):
         PromptServer.instance._fast_canvas_refresh_signals = {}
     return PromptServer.instance._fast_canvas_refresh_signals
@@ -64,7 +64,7 @@ class FastCanvasTool:
         return (canvas_data,)
 
 def base64_to_tensor(base64_string):
-    """将 base64 图像数据转换为 tensor"""
+    """Convert base64 image data to tensor"""
     try:
         if ',' in base64_string:
             base64_string = base64_string.split(',')[1]
@@ -76,17 +76,17 @@ def base64_to_tensor(base64_string):
                 if image.mode != 'RGB':
                     image = image.convert('RGB')
                 
-                # 转换为numpy数组并归一化
+                # Convert to numpy array并归一化
                 image_np = np.array(image).astype(np.float32) / 255.0
 
-                # 处理灰度图像
+                # 处理灰度image
                 if image_np.ndim == 2:
                     image_np = np.stack([image_np] * 3, axis=-1)
-                # 处理RGBA图像
+                # 处理RGBAimage
                 elif image_np.shape[2] == 4:
                     image_np = image_np[:, :, :3]
 
-                # 确保图像格式正确 [B, H, W, C]
+                # Ensureimageformat正确 [B, H, W, C]
                 image_np = np.expand_dims(image_np, axis=0)
                 tensor = torch.from_numpy(image_np).float()
                 print(f"[Tensor Debug] Converted image to tensor: {tensor.shape}")
@@ -140,10 +140,10 @@ async def handle_canvas_data(request):
     canvas_storage = get_canvas_storage()
     
     if node_id not in canvas_storage:
-        print(f"[FastCanvas] 没有找到等待响应的节点")
+        print(f"[FastCanvas] 没有找到等待响应的node")
         return web.Response(status=200)
         
-    print(f"[FastCanvas] 成功等待节点，准备处理数据")
+    print(f"[FastCanvas] 成功等待node，准备处理数据")
     transform_data = data.get('layer_transforms', {})
     main_image = array_to_tensor(data.get('main_image'), "image")
     main_mask = array_to_tensor(data.get('main_mask'), "mask")
@@ -169,7 +169,7 @@ async def handle_refresh_signal(request):
     node_id = data.get('node_id')
     refresh_signals = get_refresh_signals()
     refresh_signals[node_id] = True
-    print(f"[FastCanvas] 节点{node_id}设置need_update=True")
+    print(f"[FastCanvas] node{node_id}set need_update=True")
     
     return web.json_response({"status": "success"})
 
@@ -180,11 +180,11 @@ class FastCanvas:
     def __init__(self):
         self.node_id = None
         self.last_fc_data = None
-        self.need_update = False  # 添加need_update变量
+        self.need_update = False  # Addneed_update变量
 
     @classmethod
     def clean_nodes(cls):
-        """清理过期节点"""
+        """Clean expired nodes"""
         canvas_storage = get_canvas_storage()
         expired_nodes = []
         for node_id, node_info in canvas_storage.items():
@@ -213,7 +213,7 @@ class FastCanvas:
         try:
             self.node_id = unique_id
             
-            # 检查刷新信号
+            # 检查refresh signal
             refresh_signals = get_refresh_signals()
             need_update = refresh_signals.pop(unique_id, False)
             
@@ -226,7 +226,7 @@ class FastCanvas:
                 "waiting_for_response": True
             }
             
-            # 根据刷新信号或fc_data决定发送哪种事件
+            # 根据refresh signal或fc_data决定发送哪种事件
             if need_update or (fc_data is not None and (not hasattr(self, 'last_fc_data') or self.last_fc_data != fc_data)):
                 PromptServer.instance.send_sync(
                     "fast_canvas_update", {
@@ -272,7 +272,7 @@ class FastCanvas:
             return None, None, None
 
         except Exception as e:
-            print(f"[FastCanvas] 处理过程发生异常: {str(e)}")
+            print(f"[FastCanvas] Exception occurred during processing: {str(e)}")
             canvas_storage = get_canvas_storage()
             if unique_id in canvas_storage:
                 canvas_storage[unique_id]["waiting_for_response"] = False
@@ -280,7 +280,7 @@ class FastCanvas:
             return None, None, None
 
     def __del__(self):
-        # 确保从存储中删除节点数据
+        # EnsureRemove node data from storage
         canvas_storage = get_canvas_storage()
         if self.node_id and self.node_id in canvas_storage:
             del canvas_storage[self.node_id]
@@ -339,8 +339,8 @@ class FastCanvasComposite:
                     "label_on": "HD Restore", 
                     "label_off": "Inherit Mode"
                 }),
-                "offset_x": ("INT", {"default": 0, "min": -1000, "max": 1000, "step": 1}),  # 添加X轴偏移
-                "offset_y": ("INT", {"default": 0, "min": -1000, "max": 1000, "step": 1}),  # 添加Y轴偏移
+                "offset_x": ("INT", {"default": 0, "min": -1000, "max": 1000, "step": 1}),  # Add X-axis offset
+                "offset_y": ("INT", {"default": 0, "min": -1000, "max": 1000, "step": 1}),  # Add Y-axis offset
             }
         }
     
@@ -350,39 +350,39 @@ class FastCanvasComposite:
     CATEGORY = CATEGORY_TYPE
 
     def tensor2pil(self, tensor):
-        # 确保张量是 [H, W, C] 格式
+        # Ensure tensor is [H, W, C] format
         if len(tensor.shape) == 4:
-            tensor = tensor[0]  # 移除批次维度
-        # 转换到 0-255 范围
+            tensor = tensor[0]  # remove batch dimension
+        # Convert to 0-255 range
         tensor = (tensor * 255).byte()
-        # 转换为PIL图像
+        # Convert to PIL image
         return Image.fromarray(tensor.cpu().numpy())
 
     def pil2tensor(self, image):
-        # 转换为numpy数组
+        # Convert to numpy array
         np_image = np.array(image).astype(np.float32) / 255.0
-        # 转换为tensor并添加批次维度
+        # Convert to tensor and add batch dimension
         return torch.from_numpy(np_image).unsqueeze(0)
 
     def calculate_hd_scale(self, transform_data, fg_width, fg_height):
-        """计算高清还原模式的缩放比例"""
-        # 获取图层数据
+        """Compute scaling factor for HD restore mode"""
+        # Get layer data
         layer_data = next(trans for key, trans in transform_data.items() if key != 'background')
         
-        # 计算变换后的尺寸
+        # Compute transformed size
         transformed_width = layer_data['width'] * layer_data['scaleX']
         transformed_height = layer_data['height'] * layer_data['scaleY']
         
-        # 计算放大系数
+        # Compute upscale factor
         scale_x = fg_width / transformed_width
         scale_y = fg_height / transformed_height
         
         return min(scale_x, scale_y)
     def scale_hd_transform(self, transform_data, scale):
-        """调整高清还原模式的变换数据"""
+        """AdjustHD restore mode的transform data"""
         new_data = {'background': transform_data['background']}
         
-        # 获取并处理图层数据（排除background后只剩一个）
+        # Get并处理layer data（排除background后只剩一个）
         layer_id = next(key for key in transform_data.keys() if key != 'background')
         layer_data = transform_data[layer_id]
         
@@ -403,7 +403,7 @@ class FastCanvasComposite:
 
     def composite(self, bg_img, image, mask, transform_data, mode=False, invert_mask=False, offset_x=0, offset_y=0):
         try:
-            # 确保所有输入都是批次格式 [B, H, W, C] 或 [B, H, W]
+            # Ensure所有输入都是批次format [B, H, W, C] 或 [B, H, W]
             if bg_img.dim() == 3:
                 bg_img = bg_img.unsqueeze(0)
             if image.dim() == 3:
@@ -411,33 +411,33 @@ class FastCanvasComposite:
             if mask.dim() == 2:
                 mask = mask.unsqueeze(0)
             
-            # 如果输入是 [B, C, H, W] 格式，转换为 [B, H, W, C]
+            # 如果输入是 [B, C, H, W] format，Convert to [B, H, W, C]
             if bg_img.shape[1] == 3 or bg_img.shape[1] == 4:
                 bg_img = bg_img.permute(0, 2, 3, 1)
             if image.shape[1] == 3 or image.shape[1] == 4:
                 image = image.permute(0, 2, 3, 1)
             
-            # 获取批次大小
+            # Get批次大小
             batch_size = bg_img.shape[0]
             
             # 创建结果列表
             result_tensors = []
             mask_tensors = []
             
-            # 对每个批次进行处理
+            # Process each batch
             for i in range(batch_size):
-                # 转换当前批次的图像到PIL格式
+                # 转换当前批次的image到PILformat
                 bg_pil = self.tensor2pil(bg_img[i:i+1])
                 fg_pil = self.tensor2pil(image[i:i+1])
                 
-                # 获取当前批次的transform_data
+                # Get当前批次的transform_data
                 current_transform = transform_data[i] if isinstance(transform_data, list) else transform_data
                 
-                # 获取原始目标尺寸
+                # Get原始目标尺寸
                 target_width = current_transform['background']['width']
                 target_height = current_transform['background']['height']
                 
-                # 处理高清还原模式
+                # 处理HD restore mode
                 if mode:
                     scale = self.calculate_hd_scale(current_transform, fg_pil.width, fg_pil.height)
                     target_width = round(target_width * scale)
@@ -447,27 +447,27 @@ class FastCanvasComposite:
                 # 将背景图片缩放到目标尺寸
                 bg_pil = bg_pil.resize((target_width, target_height), Image.LANCZOS)
                 
-                # 处理遮罩
+                # 处理Mask
                 current_mask = mask[i] if mask.dim() == 3 else mask[i:i+1]
                 mask_pil = Image.fromarray((current_mask.cpu().numpy() * 255).astype(np.uint8), 'L')
                 
                 if invert_mask:
                     mask_pil = ImageOps.invert(mask_pil)
                 
-                # 创建结果画布
+                # Create result canvas
                 result = bg_pil.copy()
                 result_mask = Image.new('L', bg_pil.size, 0)
 
-                # 处理每个变换数据
+                # 处理每个transform data
                 for layer_id, trans in current_transform.items():
                     if layer_id == 'background':
                         continue
                     
-                    # 获取原始尺寸
+                    # Get原始尺寸
                     orig_width = trans.get('width', fg_pil.width)
                     orig_height = trans.get('height', fg_pil.height)
                     
-                    # 获取变换参数
+                    # Get变换参数
                     scale_x = trans.get('scaleX', 1)
                     scale_y = trans.get('scaleY', 1)
                     angle = trans.get('angle', 0)
@@ -480,7 +480,7 @@ class FastCanvasComposite:
                     new_width = int(orig_width * scale_x)
                     new_height = int(orig_height * scale_y)
                     
-                    # 缩放图像和遮罩
+                    # 缩放image和Mask
                     transformed_fg = fg_pil.resize((new_width, new_height), Image.LANCZOS)
                     transformed_mask = mask_pil.resize((new_width, new_height), Image.LANCZOS)
                     
@@ -497,34 +497,34 @@ class FastCanvasComposite:
                         transformed_fg = transformed_fg.rotate(-angle, expand=True, resample=Image.BICUBIC)
                         transformed_mask = transformed_mask.rotate(-angle, expand=True, resample=Image.BICUBIC)
                     
-                    # 获取最终尺寸
+                    # Get最终尺寸
                     current_width = transformed_fg.width
                     current_height = transformed_fg.height
                     
-                    # 计算粘贴位置（添加偏移量）
+                    # 计算粘贴位置（Add偏移量）
                     paste_x = int(center_x - current_width / 2) + offset_x
                     paste_y = int(center_y - current_height / 2) + offset_y
                     
-                    # 合成图像
+                    # 合成image
                     result.paste(transformed_fg, (paste_x, paste_y), transformed_mask)
                     result_mask.paste(transformed_mask, (paste_x, paste_y))
                 
-                # 将处理后的结果添加到列表中
+                # 将处理后的结果Add到列表中
                 result_tensors.append(self.pil2tensor(result))
                 mask_tensor = torch.from_numpy(np.array(result_mask)).float() / 255.0
                 mask_tensors.append(mask_tensor.unsqueeze(0))
             
-            # 合并所有批次的结果
+            # Concatenate batch results
             final_result = torch.cat(result_tensors, dim=0)
             final_mask = torch.cat(mask_tensors, dim=0)
             
             return (final_result, final_mask)
 
         except Exception as e:
-            print(f"合成失败: {str(e)}")
-            print(f"背景图像形状: {bg_img.shape}")
-            print(f"前景图像形状: {image.shape}")
-            print(f"遮罩形状: {mask.shape}")
+            print(f"Synthesis failed: {str(e)}")
+            print(f"Background image shape: {bg_img.shape}")
+            print(f"Foreground image shape: {image.shape}")
+            print(f"Mask shape: {mask.shape}")
             import traceback
             traceback.print_exc()
             return (bg_img, torch.ones_like(mask[0]))
