@@ -2,7 +2,7 @@
 from .md import *
 crop_node_data = {}
 class ImageCropper:
-    """图像裁剪专用节点"""
+    """Image cropping node"""
     
     @classmethod
     def INPUT_TYPES(cls):
@@ -16,7 +16,7 @@ class ImageCropper:
         }
 
     RETURN_TYPES = ("IMAGE",)
-    RETURN_NAMES = ("裁剪图像",)
+    RETURN_NAMES = ("裁剪image",)
     FUNCTION = "crop"
     CATEGORY = "🎈LAOGOU/Image"
 
@@ -25,14 +25,14 @@ class ImageCropper:
             node_id = unique_id
             event = Event()
             
-            # 初始化节点数据
+            # 初始化node数据
             crop_node_data[node_id] = {
                 "event": event,
                 "result": None,
                 "processing_complete": False
             }
             
-            # 发送预览图像
+            # 发送预览image
             preview_image = (torch.clamp(image.clone(), 0, 1) * 255).cpu().numpy().astype(np.uint8)[0]
             pil_image = Image.fromarray(preview_image)
             buffer = io.BytesIO()
@@ -47,12 +47,12 @@ class ImageCropper:
                 
                 # 等待前端裁剪完成
                 if not event.wait(timeout=30):
-                    print(f"[ImageCropper] 等待超时: 节点ID {node_id}")
+                    print(f"[ImageCropper] Timed out while waiting: nodeID {node_id}")
                     if node_id in crop_node_data:
                         del crop_node_data[node_id]
                     return (image,)
 
-                # 获取结果
+                # Get结果
                 result_image = None
                 
                 if node_id in crop_node_data:
@@ -62,14 +62,14 @@ class ImageCropper:
                 return (result_image if result_image is not None else image,)
                 
             except Exception as e:
-                print(f"[ImageCropper] 处理过程中出错: {str(e)}")
+                print(f"[ImageCropper] Error during processing: {str(e)}")
                 traceback.print_exc()
                 if node_id in crop_node_data:
                     del crop_node_data[node_id]
                 return (image,)
             
         except Exception as e:
-            print(f"[ImageCropper] 节点执行出错: {str(e)}")
+            print(f"[ImageCropper] Node execution error: {str(e)}")
             traceback.print_exc()
             return (image,)
 
@@ -78,7 +78,7 @@ async def apply_image_cropper(request):
     try:
         # 检查内容类型
         content_type = request.headers.get('Content-Type', '')
-        print(f"[ImageCropper] 请求内容类型: {content_type}")
+        print(f"[ImageCropper] Request content type: {content_type}")
         
         node_id = None
         crop_width = None
@@ -143,9 +143,9 @@ async def apply_image_cropper(request):
                         node_info["result"] = tensor_image
                         node_info["event"].set()
                     else:
-                        print(f"[ImageCropper] 警告: 图像数组形状不符合预期: {np_image.shape}")
+                        print(f"[ImageCropper] 警告: image数组形状不符合预期: {np_image.shape}")
                 except Exception as e:
-                    print(f"[ImageCropper] 处理图像数据时出错: {str(e)}")
+                    print(f"[ImageCropper] Error processing image data: {str(e)}")
                     traceback.print_exc()
                     node_info["event"].set()
             
@@ -170,12 +170,12 @@ async def cancel_crop(request):
         node_id = data.get("node_id")
         
         if node_id in crop_node_data:
-            # 设置事件，让节点继续执行
+            # 设置事件，让node继续执行
             crop_node_data[node_id]["event"].set()
-            print(f"[ImageCropper] 取消裁剪操作: 节点ID {node_id}")
+            print(f"[ImageCropper] 取消裁剪操作: nodeID {node_id}")
             return web.json_response({"success": True})
         
-        return web.json_response({"success": False, "error": "节点未找到"})
+        return web.json_response({"success": False, "error": "node未找到"})
         
     except Exception as e:
         print(f"[ImageCropper] 取消请求处理出错: {str(e)}")
@@ -187,5 +187,5 @@ NODE_CLASS_MAPPINGS = {
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "ImageCropper": "图像裁剪",
+    "ImageCropper": "image裁剪",
 }
