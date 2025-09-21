@@ -30,7 +30,7 @@ class AlwaysEqualProxy(str):
         return False
     
 class AnyType(str):
-    """用于表示任意类型的特殊类，在类型比较时总是返回相等"""
+    """A special class that represents any type and always compares equal in type checks"""
     def __eq__(self, _) -> bool:
         return True
 
