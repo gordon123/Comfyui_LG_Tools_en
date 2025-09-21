@@ -6,7 +6,7 @@ class ImageSelectorCancelled(Exception):
     pass
 
 def get_selector_storage():
-    """GetShared storage for image selector"""
+    """Get shared storage for the image selector"""
     if not hasattr(PromptServer.instance, '_selector_node_data'):
         PromptServer.instance._selector_node_data = {}
     return PromptServer.instance._selector_node_data
@@ -43,7 +43,7 @@ class ImageSelector(PreviewImage):
             node_id = str(unique_id[0]) if isinstance(unique_id, list) else str(unique_id)
             actual_mode = mode[0] if isinstance(mode, list) else mode
             
-            # Get共享存储空间
+            # Get shared storage
             node_data = get_selector_storage()
             
             image_list = []
@@ -181,17 +181,17 @@ async def select_image_handler(request):
         selected_indices = data.get("selected_indices", [])
         action = data.get("action")
         
-        # Get共享存储空间
+        # Get shared storage
         node_data = get_selector_storage()
         
         if node_id not in node_data:
-            return web.json_response({"success": False, "error": "node数据不存In"})
+            return web.json_response({"success": False, "error": "node data does not exist"})
         
         try:
             node_info = node_data[node_id]
             
             if "total_count" not in node_info:
-                return web.json_response({"success": False, "error": "node已完成处理"})
+                return web.json_response({"success": False, "error": "node has finished processing"})
             
             if action == "cancel":
                 node_info["cancelled"] = True
@@ -202,9 +202,9 @@ async def select_image_handler(request):
                     node_info["selected_indices"] = valid_indices
                     node_info["cancelled"] = False
                 else:
-                    return web.json_response({"success": False, "error": "选择索引无效"})
+                    return web.json_response({"success": False, "error": "invalid selection indices"})
             else:
-                return web.json_response({"success": False, "error": "无效操作"})
+                return web.json_response({"success": False, "error": "invalid action"})
             
             node_info["event"].set()
             return web.json_response({"success": True})
@@ -212,15 +212,15 @@ async def select_image_handler(request):
         except Exception as e:
             if node_id in node_data and "event" in node_data[node_id]:
                 node_data[node_id]["event"].set()
-            return web.json_response({"success": False, "error": "处理失败"})
+            return web.json_response({"success": False, "error": "processing failed"})
 
     except Exception as e:
-        return web.json_response({"success": False, "error": "请求失败"})
+        return web.json_response({"success": False, "error": "request failed"})
 
 NODE_CLASS_MAPPINGS = {
     "ImageSelector": ImageSelector,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "ImageSelector": "🎈LG_image选择器",
-} 
+    "ImageSelector": "🎈LG Image Selector",
+}
