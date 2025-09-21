@@ -1,7 +1,7 @@
 from .md import *
 node_data = {}
 class ColorAdjustment:
-    """颜色调整节点"""
+    """Color adjustment node"""
     
     @classmethod
     def INPUT_TYPES(cls):
@@ -68,7 +68,7 @@ async def apply_color_adjustment(request):
         adjusted_data = data.get("adjusted_data")
         
         if node_id not in node_data:
-            return web.json_response({"success": False, "error": "节点数据不存在"})
+            return web.json_response({"success": False, "error": "node数据不存In"})
         
         try:
             node_info = node_data[node_id]
@@ -98,5 +98,5 @@ NODE_CLASS_MAPPINGS = {
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "ColorAdjustment": "颜色调整",
+    "ColorAdjustment": "Color Adjustment",
 }
