@@ -6,7 +6,7 @@ class ImageSelectorCancelled(Exception):
     pass
 
 def get_selector_storage():
-    """获取图像选择器的共享存储空间"""
+    """GetShared storage for image selector"""
     if not hasattr(PromptServer.instance, '_selector_node_data'):
         PromptServer.instance._selector_node_data = {}
     return PromptServer.instance._selector_node_data
@@ -43,7 +43,7 @@ class ImageSelector(PreviewImage):
             node_id = str(unique_id[0]) if isinstance(unique_id, list) else str(unique_id)
             actual_mode = mode[0] if isinstance(mode, list) else mode
             
-            # 获取共享存储空间
+            # Get共享存储空间
             node_data = get_selector_storage()
             
             image_list = []
@@ -62,9 +62,9 @@ class ImageSelector(PreviewImage):
                 elif len(images.shape) == 3:
                     image_list.append(images.unsqueeze(0))
                 else:
-                    raise ValueError(f"不支持的图像维度: {images.shape}")
+                    raise ValueError(f"Unsupported image dimensions: {images.shape}")
             else:
-                raise ValueError(f"不支持的输入类型: {type(images)}")
+                raise ValueError(f"Unsupported input type: {type(images)}")
             
             preview_images = []
             for i, img in enumerate(image_list):
@@ -121,7 +121,7 @@ class ImageSelector(PreviewImage):
                 node_info = node_data[node_id]
                 if node_info.get("cancelled", False):
                     self.cleanup_session_data(node_id)
-                    raise ImageSelectorCancelled("用户取消选择")
+                    raise ImageSelectorCancelled("User canceled selection")
                 
                 if "selected_indices" in node_info and node_info["selected_indices"] is not None:
                     break
@@ -165,7 +165,7 @@ class ImageSelector(PreviewImage):
                 return {"result": ([], "")}
 
     def cleanup_session_data(self, node_id):
-        """清理会话数据"""
+        """Clean up session data"""
         node_data = get_selector_storage()
         if node_id in node_data:
             session_keys = ["event", "selected_indices", "images", "total_count", "cancelled"]
@@ -181,17 +181,17 @@ async def select_image_handler(request):
         selected_indices = data.get("selected_indices", [])
         action = data.get("action")
         
-        # 获取共享存储空间
+        # Get共享存储空间
         node_data = get_selector_storage()
         
         if node_id not in node_data:
-            return web.json_response({"success": False, "error": "节点数据不存在"})
+            return web.json_response({"success": False, "error": "node数据不存In"})
         
         try:
             node_info = node_data[node_id]
             
             if "total_count" not in node_info:
-                return web.json_response({"success": False, "error": "节点已完成处理"})
+                return web.json_response({"success": False, "error": "node已完成处理"})
             
             if action == "cancel":
                 node_info["cancelled"] = True
@@ -222,5 +222,5 @@ NODE_CLASS_MAPPINGS = {
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "ImageSelector": "🎈LG_图像选择器",
+    "ImageSelector": "🎈LG_image选择器",
 } 
