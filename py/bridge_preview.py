@@ -18,12 +18,12 @@ def get_bridge_storage():
         PromptServer.instance._bridge_node_data = {}
     return PromptServer.instance._bridge_node_data
 def get_bridge_cache():
-    """获取桥接节点的缓存存储"""
+    """Get cache storage for bridge node"""
     if not hasattr(PromptServer.instance, '_bridge_node_cache'):
         PromptServer.instance._bridge_node_cache = {}
     return PromptServer.instance._bridge_node_cache
 class BridgePreviewNode(PreviewImage):
-    """桥接预览节点，等待前端遮罩操作完成后输出图片"""
+    """Bridge preview node that waits for front-end mask editing to output images"""
     def __init__(self):
         super().__init__()
         self.prefix_append = "_bridge_" + ''.join(random.choice("abcdefghijklmnopqrstupvxyz") for x in range(5))
@@ -42,12 +42,12 @@ class BridgePreviewNode(PreviewImage):
             },
         }
     RETURN_TYPES = ("IMAGE", "MASK")
-    RETURN_NAMES = ("处理后图像", "遮罩")
+    RETURN_NAMES = ("Processed Image", "Mask")
     FUNCTION = "process_image"
     OUTPUT_NODE = True
     CATEGORY = "🎈LAOGOU/Image"
     def calculate_image_hash(self, images):
-        """计算图片的哈希值用于检测是否改变"""
+        """Calculate image hash to detect changes"""
         try:
             np_images = images.cpu().numpy()
             image_bytes = np_images.tobytes()
@@ -55,7 +55,7 @@ class BridgePreviewNode(PreviewImage):
         except:
             return None
     def save_output_images(self, images, mask, filename_prefix="ComfyUI", prompt=None, extra_pnginfo=None):
-        """保存输出图片（带遮罩的RGBA图片）用于前端显示"""
+        """Save output images (RGBA with mask) for front-end display"""
         try:
             if images.shape[0] != mask.shape[0]:
                 return None
@@ -94,7 +94,7 @@ class BridgePreviewNode(PreviewImage):
         except Exception as e:
             return None
     def process_image(self, images, file_info="", skip=False, filename_prefix="ComfyUI", prompt=None, extra_pnginfo=None, unique_id=None):
-        """处理图像，等待前端遮罩操作完成"""
+        """Process images, waiting for front-end mask operation to complete"""
         try:
             node_id = str(unique_id)
             current_hash = self.calculate_image_hash(images)
@@ -106,16 +106,16 @@ class BridgePreviewNode(PreviewImage):
                     cached_data = cache[node_id]
                     if (cached_data.get("input_hash") == current_hash and 
                         cached_data.get("final_result")):
-                        # 返回缓存的最终结果，保持与弹窗模式一致的遮罩反转
+                        # 返回缓存的最终结果，保持与弹窗模式一致的Mask反转
                         cached_images, cached_mask = cached_data["final_result"]
                         return (cached_images, 1 - cached_mask)
                 
-                # 没有缓存或输入改变，返回原图和全白遮罩
+                # 没有缓存或输入改变，返回原图和全白Mask
                 batch_size, height, width, channels = images.shape
                 default_mask = torch.ones((batch_size, height, width), dtype=torch.float32)
                 return (images, default_mask)
             
-            # 正常预览遮罩编辑流程
+            # 正常预览Mask编辑流程
             event = Event()
             preview_urls = []
             should_send_to_frontend = True
@@ -163,15 +163,15 @@ class BridgePreviewNode(PreviewImage):
                 if result_data is not None and isinstance(result_data, tuple) and len(result_data) == 2:
                     final_images, final_mask = result_data
                     if current_hash:
-                        # 缓存时使用原始遮罩
+                        # 缓存时使用原始Mask
                         output_result = self.save_output_images(final_images, final_mask, filename_prefix + "_output", prompt, extra_pnginfo)
                         output_urls = output_result["ui"]["images"] if output_result and "ui" in output_result else []
                         cache[node_id] = {
                             "input_hash": current_hash,
                             "output_urls": output_urls,
-                            "final_result": (final_images, final_mask)  # 缓存原始遮罩
+                            "final_result": (final_images, final_mask)  # 缓存原始Mask
                         }
-                    # 返回时反转遮罩，但不影响缓存
+                    # 返回时反转Mask，但不影响缓存
                     return (final_images, 1 - final_mask)
                 else:
                     return (images, default_mask)
@@ -189,13 +189,13 @@ class BridgePreviewNode(PreviewImage):
             return (images, default_mask)
 @PromptServer.instance.routes.post("/bridge_preview/confirm")
 async def confirm_bridge_preview(request):
-    """处理前端确认遮罩操作完成"""
+    """Handle front-end confirmationMask操作完成"""
     try:
         data = await request.json()
         node_id = str(data.get("node_id"))
         file_info = data.get("file_info")
         if node_id not in get_bridge_storage():
-            return web.json_response({"success": False, "error": "节点未找到或已超时"})
+            return web.json_response({"success": False, "error": "node未找到或已超时"})
         try:
             node_info = get_bridge_storage()[node_id]
             if file_info:
@@ -219,13 +219,13 @@ async def cancel_bridge_preview(request):
         node_id = str(data.get("node_id"))
         if node_id in get_bridge_storage():
             get_bridge_storage()[node_id]["event"].set()
-            return web.json_response({"success": True, "message": f"节点 {node_id} 已取消"})
+            return web.json_response({"success": True, "message": f"node {node_id} 已取消"})
         else:
-            return web.json_response({"success": False, "error": f"节点 {node_id} 未找到或已超时"})
+            return web.json_response({"success": False, "error": f"node {node_id} 未找到或已超时"})
     except Exception as e:
         return web.json_response({"success": False, "error": str(e)})
 def load_processed_image(file_info):
-    """从文件信息加载处理后的图片，返回图像和遮罩"""
+    """从文件信息加载处理后的图片，返回image和Mask"""
     try:
         if isinstance(file_info, dict):
             filename = file_info.get("filename")
